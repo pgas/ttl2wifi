@@ -1,6 +1,7 @@
-# ssh.py - Minimal SSH-2 Client for MicroPython (Pico W)
-# Uses built-in C primitives: pow(g, x, p), cryptolib.aes, hashlib.sha256
-# Implements: diffie-hellman-group14-sha256 + aes128-ctr + hmac-sha2-256
+# ssh.py - SSH-2 Client for MicroPython (Pico W)
+# Supports: curve25519-sha256 (RFC 8731) & diffie-hellman-group14-sha256 (RFC 8268)
+# Cipher:   aes128-ctr (via C cryptolib.aes)
+# MAC:      hmac-sha2-256 (via C hashlib.sha256)
 
 import cryptolib
 import hashlib
@@ -9,7 +10,7 @@ import socket
 import struct
 import time
 
-# SSH Message Numbers (RFC 4253 / 4252 / 4254)
+# SSH Message Numbers (RFC 4253 / 4252 / 4254 / 8731)
 SSH_MSG_DISCONNECT = 1
 SSH_MSG_IGNORE = 2
 SSH_MSG_UNIMPLEMENTED = 3
@@ -18,8 +19,8 @@ SSH_MSG_SERVICE_REQUEST = 5
 SSH_MSG_SERVICE_ACCEPT = 6
 SSH_MSG_KEXINIT = 20
 SSH_MSG_NEWKEYS = 21
-SSH_MSG_KEXDH_INIT = 30
-SSH_MSG_KEXDH_REPLY = 31
+SSH_MSG_KEX_INIT = 30        # KEX_ECDH_INIT (30) / KEXDH_INIT (30)
+SSH_MSG_KEX_REPLY = 31       # KEX_ECDH_REPLY (31) / KEXDH_REPLY (31)
 SSH_MSG_USERAUTH_REQUEST = 50
 SSH_MSG_USERAUTH_FAILURE = 51
 SSH_MSG_USERAUTH_SUCCESS = 52
@@ -39,7 +40,11 @@ SSH_MSG_CHANNEL_REQUEST = 98
 SSH_MSG_CHANNEL_SUCCESS = 99
 SSH_MSG_CHANNEL_FAILURE = 100
 
-# RFC 3526 Group 14 2048-bit MODP Prime
+# Curve25519 prime 2^255 - 19 (RFC 7748)
+_P25519 = (1 << 255) - 19
+_BASE25519 = b"\x09" + b"\x00" * 31
+
+# RFC 3526 Group 14 2048-bit MODP Prime (Fallback)
 _DH_G14_P = int(
     "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
     "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
@@ -55,6 +60,45 @@ _DH_G14_P = int(
     16,
 )
 _DH_G14_G = 2
+
+
+def _x25519(k_bytes, u_bytes):
+    """RFC 7748 X25519 scalar multiplication over GF(2^255 - 19)."""
+    P = _P25519
+    k = bytearray(k_bytes)
+    k[0] &= 248
+    k[31] &= 127
+    k[31] |= 64
+    scalar = int.from_bytes(k, "little")
+    u = int.from_bytes(u_bytes, "little") & ((1 << 255) - 1)
+    x_1, x_2, z_2, x_3, z_3, swap = u, 1, 0, u, 1, 0
+    for t in range(254, -1, -1):
+        k_t = (scalar >> t) & 1
+        swap ^= k_t
+        if swap:
+            x_2, x_3 = x_3, x_2
+            z_2, z_3 = z_3, z_2
+        swap = k_t
+        A = (x_2 + z_2) % P
+        AA = (A * A) % P
+        B = (x_2 - z_2) % P
+        BB = (B * B) % P
+        E = (AA - BB) % P
+        C = (x_3 + z_3) % P
+        D = (x_3 - z_3) % P
+        DA = (D * A) % P
+        CB = (C * B) % P
+        t1 = (DA + CB) % P
+        x_3 = (t1 * t1) % P
+        t2 = (DA - CB) % P
+        z_3 = (x_1 * ((t2 * t2) % P)) % P
+        x_2 = (AA * BB) % P
+        z_2 = (E * (AA + 121665 * E)) % P
+    if swap:
+        x_2, x_3 = x_3, x_2
+        z_2, z_3 = z_3, z_2
+    res = (x_2 * pow(z_2, P - 2, P)) % P
+    return res.to_bytes(32, "little")
 
 
 def _ssh_str(b):
@@ -179,7 +223,7 @@ class SshSession:
             if not payload:
                 continue
             msg_id = payload[0]
-            if msg_id in (SSH_MSG_IGNORE, SSH_MSG_DEBUG, SSH_MSG_GLOBAL_REQUEST):
+            if msg_id in (SSH_MSG_IGNORE, SSH_MSG_DEBUG, SSH_MSG_GLOBAL_REQUEST, 7):  # 7 = EXT_INFO
                 continue
             if msg_id == SSH_MSG_DISCONNECT:
                 reason = payload[5:].decode("utf-8", "replace")
@@ -196,8 +240,8 @@ def _derive_key(K_mpint, H, char_letter, session_id, needed_bytes=32):
 
 def ssh_connect_and_run(target, password, flow_uart):
     """
-    Connect to user@host[:port], perform SSH-2 KEX + password auth,
-    open a vt100 PTY + shell, and bridge UART0 until the session closes or '+++' is typed.
+    Connect to user@host[:port], perform SSH-2 KEX (curve25519-sha256 or DH group14)
+    + password/keyboard-interactive auth, open a vt100 PTY + shell, and bridge UART0.
     """
     if "@" not in target:
         raise ValueError('Expected "user@host[:port]"')
@@ -213,10 +257,9 @@ def ssh_connect_and_run(target, password, flow_uart):
     raw_sock.settimeout(15.0)
     try:
         raw_sock.connect(addr)
-        V_C = b"SSH-2.0-TTL2WiFi_PicoW_1.0"
+        V_C = b"SSH-2.0-TTL2WiFi_PicoW_1.1"
         raw_sock.sendall(V_C + b"\r\n")
 
-        # Read server banner line (may have pre-banner lines before SSH-2.0-)
         V_S = b""
         while True:
             line = b""
@@ -231,12 +274,12 @@ def ssh_connect_and_run(target, password, flow_uart):
 
         sess = SshSession(raw_sock)
 
-        # Build client KEXINIT
+        # Receive server KEXINIT first or send ours
         cookie = os.urandom(16)
         kex_payload = (
             bytes([SSH_MSG_KEXINIT])
             + cookie
-            + _ssh_str("diffie-hellman-group14-sha256")
+            + _ssh_str("curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group14-sha256")
             + _ssh_str("ssh-ed25519,rsa-sha2-256,rsa-sha2-512,ecdsa-sha2-nistp256,ssh-rsa")
             + _ssh_str("aes128-ctr")
             + _ssh_str("aes128-ctr")
@@ -256,44 +299,78 @@ def ssh_connect_and_run(target, password, flow_uart):
         if I_S[0] != SSH_MSG_KEXINIT:
             raise OSError(f"Expected KEXINIT, got {I_S[0]}")
 
-        # Diffie-Hellman Group 14 SHA-256
-        flow_uart.write(b"+SSH: Negotiating DH Group 14 SHA-256 keys...\r\n")
-        x = int.from_bytes(os.urandom(32), "big") | 1
-        e = pow(_DH_G14_G, x, _DH_G14_P)
-        sess.send_packet(bytes([SSH_MSG_KEXDH_INIT]) + _ssh_mpint(e))
+        srv_kex_bytes, _ = _read_ssh_str(I_S, 17)
+        srv_kex_list = srv_kex_bytes.decode("ascii", "replace").split(",")
 
-        reply = sess.recv_packet()
-        if reply[0] != SSH_MSG_KEXDH_REPLY:
-            raise OSError(f"Expected KEXDH_REPLY, got {reply[0]}")
+        use_c25519 = (
+            "curve25519-sha256" in srv_kex_list
+            or "curve25519-sha256@libssh.org" in srv_kex_list
+        )
 
-        K_S, off = _read_ssh_str(reply, 1)
-        f_bytes, off = _read_ssh_str(reply, off)
-        _sig, off = _read_ssh_str(reply, off)
+        if use_c25519:
+            flow_uart.write(b"+SSH: Negotiating curve25519-sha256 keys...\r\n")
+            priv = os.urandom(32)
+            Q_C = _x25519(priv, _BASE25519)
+            sess.send_packet(bytes([SSH_MSG_KEX_INIT]) + _ssh_str(Q_C))
 
-        f = int.from_bytes(f_bytes, "big")
-        K = pow(f, x, _DH_G14_P)
-        K_mpint = _ssh_mpint(K)
+            reply = sess.recv_packet()
+            if reply[0] != SSH_MSG_KEX_REPLY:
+                raise OSError(f"Expected KEX_ECDH_REPLY, got {reply[0]}")
 
-        # Exchange hash H = SHA256(V_C || V_S || I_C || I_S || K_S || e || f || K)
-        h_ctx = hashlib.sha256()
-        h_ctx.update(_ssh_str(V_C))
-        h_ctx.update(_ssh_str(V_S))
-        h_ctx.update(_ssh_str(I_C))
-        h_ctx.update(_ssh_str(I_S))
-        h_ctx.update(_ssh_str(K_S))
-        h_ctx.update(_ssh_mpint(e))
-        h_ctx.update(_ssh_mpint(f))
-        h_ctx.update(K_mpint)
-        H = h_ctx.digest()
+            K_S, off = _read_ssh_str(reply, 1)
+            Q_S, off = _read_ssh_str(reply, off)
+            _sig, off = _read_ssh_str(reply, off)
+
+            shared = _x25519(priv, Q_S)
+            K = int.from_bytes(shared, "big")
+            K_mpint = _ssh_mpint(K)
+
+            h_ctx = hashlib.sha256()
+            h_ctx.update(_ssh_str(V_C))
+            h_ctx.update(_ssh_str(V_S))
+            h_ctx.update(_ssh_str(I_C))
+            h_ctx.update(_ssh_str(I_S))
+            h_ctx.update(_ssh_str(K_S))
+            h_ctx.update(_ssh_str(Q_C))
+            h_ctx.update(_ssh_str(Q_S))
+            h_ctx.update(K_mpint)
+            H = h_ctx.digest()
+        else:
+            flow_uart.write(b"+SSH: Negotiating DH Group 14 SHA-256 keys...\r\n")
+            x = int.from_bytes(os.urandom(32), "big") | 1
+            e = pow(_DH_G14_G, x, _DH_G14_P)
+            sess.send_packet(bytes([SSH_MSG_KEX_INIT]) + _ssh_mpint(e))
+
+            reply = sess.recv_packet()
+            if reply[0] != SSH_MSG_KEX_REPLY:
+                raise OSError(f"Expected KEXDH_REPLY, got {reply[0]}")
+
+            K_S, off = _read_ssh_str(reply, 1)
+            f_bytes, off = _read_ssh_str(reply, off)
+            _sig, off = _read_ssh_str(reply, off)
+
+            f = int.from_bytes(f_bytes, "big")
+            K = pow(f, x, _DH_G14_P)
+            K_mpint = _ssh_mpint(K)
+
+            h_ctx = hashlib.sha256()
+            h_ctx.update(_ssh_str(V_C))
+            h_ctx.update(_ssh_str(V_S))
+            h_ctx.update(_ssh_str(I_C))
+            h_ctx.update(_ssh_str(I_S))
+            h_ctx.update(_ssh_str(K_S))
+            h_ctx.update(_ssh_mpint(e))
+            h_ctx.update(_ssh_mpint(f))
+            h_ctx.update(K_mpint)
+            H = h_ctx.digest()
+
         session_id = H
 
-        # Send & receive NEWKEYS
         sess.send_packet(bytes([SSH_MSG_NEWKEYS]))
         nk = sess.recv_packet()
         if nk[0] != SSH_MSG_NEWKEYS:
             raise OSError(f"Expected NEWKEYS, got {nk[0]}")
 
-        # Activate AES-128-CTR and HMAC-SHA256
         iv_c2s = _derive_key(K_mpint, H, "A", session_id, 16)
         iv_s2c = _derive_key(K_mpint, H, "B", session_id, 16)
         key_c2s = _derive_key(K_mpint, H, "C", session_id, 16)
@@ -306,13 +383,11 @@ def ssh_connect_and_run(target, password, flow_uart):
         sess.tx_mac_key = mac_c2s
         sess.rx_mac_key = mac_s2c
 
-        # Request ssh-userauth service
         sess.send_packet(bytes([SSH_MSG_SERVICE_REQUEST]) + _ssh_str("ssh-userauth"))
         svc = sess.recv_packet()
         if svc[0] != SSH_MSG_SERVICE_ACCEPT:
             raise OSError("ssh-userauth rejected")
 
-        # Try password authentication (and fallback to keyboard-interactive if requested)
         sess.send_packet(
             bytes([SSH_MSG_USERAUTH_REQUEST])
             + _ssh_str(user)
@@ -322,6 +397,7 @@ def ssh_connect_and_run(target, password, flow_uart):
             + _ssh_str(password)
         )
 
+        tried_kbd = False
         while True:
             auth_resp = sess.recv_packet()
             msg_id = auth_resp[0]
@@ -333,7 +409,8 @@ def ssh_connect_and_run(target, password, flow_uart):
                 break
             if msg_id == SSH_MSG_USERAUTH_FAILURE:
                 methods, _ = _read_ssh_str(auth_resp, 1)
-                if b"keyboard-interactive" in methods:
+                if not tried_kbd and b"keyboard-interactive" in methods:
+                    tried_kbd = True
                     sess.send_packet(
                         bytes([SSH_MSG_USERAUTH_REQUEST])
                         + _ssh_str(user)
@@ -342,15 +419,18 @@ def ssh_connect_and_run(target, password, flow_uart):
                         + _ssh_str("")
                         + _ssh_str("")
                     )
-                    methods = b""
                     continue
-                raise OSError("SSH authentication failed")
+                raise OSError("SSH authentication failed (check username/password)")
             if msg_id == SSH_MSG_USERAUTH_INFO_REQUEST:
-                # Respond with password to keyboard-interactive prompt
-                sess.send_packet(bytes([SSH_MSG_USERAUTH_INFO_RESPONSE]) + struct.pack(">I", 1) + _ssh_str(password))
+                num_prompts = struct.unpack_from(">I", auth_resp, 1 + 4 + len(_read_ssh_str(auth_resp, 1)[0]) + 4 + len(_read_ssh_str(auth_resp, 1 + 4 + len(_read_ssh_str(auth_resp, 1)[0]))[0]) + 4 + len(_read_ssh_str(auth_resp, 1 + 4 + len(_read_ssh_str(auth_resp, 1)[0]) + 4 + len(_read_ssh_str(auth_resp, 1 + 4 + len(_read_ssh_str(auth_resp, 1)[0]))[0]))[0]))[0]
+                resp_pkt = bytes([SSH_MSG_USERAUTH_INFO_RESPONSE]) + struct.pack(">I", num_prompts)
+                if num_prompts > 0:
+                    resp_pkt += _ssh_str(password)
+                    for _ in range(num_prompts - 1):
+                        resp_pkt += _ssh_str("")
+                sess.send_packet(resp_pkt)
                 continue
 
-        # Open 'session' channel (sender_channel = 0)
         sess.send_packet(
             bytes([SSH_MSG_CHANNEL_OPEN])
             + _ssh_str("session")
@@ -361,7 +441,6 @@ def ssh_connect_and_run(target, password, flow_uart):
             raise OSError("Failed to open SSH session channel")
         remote_chan = struct.unpack_from(">I", ch_resp, 5)[0]
 
-        # Request PTY (vt100, 80x24)
         sess.send_packet(
             bytes([SSH_MSG_CHANNEL_REQUEST])
             + struct.pack(">I", remote_chan)
@@ -371,7 +450,6 @@ def ssh_connect_and_run(target, password, flow_uart):
             + struct.pack(">IIII", 80, 24, 0, 0)
             + _ssh_str(b"\x00")
         )
-        # Request interactive shell
         sess.send_packet(
             bytes([SSH_MSG_CHANNEL_REQUEST])
             + struct.pack(">I", remote_chan)
@@ -386,7 +464,6 @@ def ssh_connect_and_run(target, password, flow_uart):
         last_rx_ms = time.ticks_ms()
 
         while True:
-            # 1. UART -> SSH channel
             u_data = flow_uart.read_online()
             if u_data:
                 now = time.ticks_ms()
@@ -405,11 +482,9 @@ def ssh_connect_and_run(target, password, flow_uart):
                     + _ssh_str(u_data)
                 )
 
-            # 2. SSH channel -> UART
             try:
                 pkt = sess.recv_packet()
             except OSError as e:
-                # Non-blocking timeout on socket
                 err_s = str(e)
                 if "ETIMEDOUT" in err_s or "timed out" in err_s or "110" in err_s or "11" in err_s:
                     continue
@@ -426,7 +501,6 @@ def ssh_connect_and_run(target, password, flow_uart):
                 pass
             elif m in (SSH_MSG_CHANNEL_EOF, SSH_MSG_CHANNEL_CLOSE):
                 break
-            # Periodically replenish receive window
             if sess.rx_seq % 32 == 0:
                 sess.send_packet(
                     bytes([SSH_MSG_CHANNEL_WINDOW_ADJUST]) + struct.pack(">II", remote_chan, 65536)
@@ -438,4 +512,3 @@ def ssh_connect_and_run(target, password, flow_uart):
             raw_sock.close()
         except Exception:
             pass
-
