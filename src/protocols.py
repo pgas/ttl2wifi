@@ -1,4 +1,4 @@
-# protocols.py - Built-in Gopher, Gemini (TLS), HTTP/HTTPS, Telnet, and NTP clients for TTL2WiFi
+# protocols.py - Built-in Gopher, Gemini (TLS), HTTP/HTTPS, Telnet, XMODEM, and NTP clients
 import socket
 import ssl
 import struct
@@ -19,6 +19,14 @@ OPT_SGA = 3
 OPT_TTYPE = 24
 OPT_NAWS = 31
 
+# XMODEM constants
+SOH = 0x01
+EOT = 0x04
+ACK = 0x06
+NAK = 0x15
+CAN = 0x18
+CRC_CHR = 0x43  # 'C'
+
 GOPHER_TYPES = {
     "0": "TXT",
     "1": "DIR",
@@ -38,6 +46,27 @@ GOPHER_TYPES = {
 }
 
 
+class BrowserState:
+    """Tracks numbered links and browsing history across Gopher and Gemini pages."""
+
+    def __init__(self):
+        self.links = []    # List of (url, label, item_type)
+        self.history = []  # Stack of visited URLs
+        self.cur_url = ""
+
+    def set_page(self, url, push_history=True):
+        if push_history and self.cur_url and self.cur_url != url:
+            self.history.append(self.cur_url)
+            if len(self.history) > 20:
+                self.history.pop(0)
+        self.cur_url = url
+        self.links = []
+
+    def add_link(self, url, label="", item_type=""):
+        self.links.append((url, label, item_type))
+        return len(self.links)
+
+
 def parse_host_port(hostport, default_port):
     if ":" in hostport:
         host, port_s = hostport.rsplit(":", 1)
@@ -48,6 +77,25 @@ def parse_host_port(hostport, default_port):
     return hostport, default_port
 
 
+def resolve_url(base_url, ref):
+    ref = ref.strip()
+    if "://" in ref:
+        return ref
+    scheme, rest = base_url.split("://", 1)
+    if "/" in rest:
+        hostport, path = rest.split("/", 1)
+        path = "/" + path
+    else:
+        hostport = rest
+        path = "/"
+    if ref.startswith("//"):
+        return f"{scheme}:{ref}"
+    if ref.startswith("/"):
+        return f"{scheme}://{hostport}{ref}"
+    base_dir = path.rsplit("/", 1)[0]
+    return f"{scheme}://{hostport}{base_dir}/{ref}"
+
+
 def stream_socket_lines(sock, flow_uart, max_bytes=262144):
     """Stream lines from sock to flow_uart with XON/XOFF flow control and Ctrl-C abort."""
     total = 0
@@ -55,7 +103,7 @@ def stream_socket_lines(sock, flow_uart, max_bytes=262144):
     while total < max_bytes:
         if flow_uart.check_abort():
             flow_uart.write(b"\r\n^C Aborted\r\n")
-            return False
+            return
         chunk = sock.read(512) if hasattr(sock, "read") else sock.recv(512)
         if not chunk:
             break
@@ -63,19 +111,14 @@ def stream_socket_lines(sock, flow_uart, max_bytes=262144):
         buf += chunk
         while b"\n" in buf:
             line, buf = buf.split(b"\n", 1)
-            line = line.rstrip(b"\r")
-            yield line
+            yield line.rstrip(b"\r")
     if buf:
         yield buf.rstrip(b"\r")
-    return True
 
 
-def gopher_fetch(target, flow_uart):
+def gopher_fetch(target, flow_uart, nav=None, query=None, push_history=True):
     """
-    Fetch a Gopher selector.
-    Accepts:
-      - "gopher://host[:port]/[T][selector]"
-      - "host[:port][/selector]"
+    Fetch a Gopher menu or document and number selectable links [1], [2], ...
     """
     url = target.strip()
     if url.startswith("gopher://"):
@@ -84,8 +127,7 @@ def gopher_fetch(target, flow_uart):
     item_type = "1"
     if "/" in url:
         hostport, selector = url.split("/", 1)
-        # Standard Gopher URLs optionally put the 1-char item type right after the first '/'
-        if len(selector) >= 2 and selector[1] == "/" and selector[0] in GOPHER_TYPES:
+        if len(selector) >= 1 and selector[0] in GOPHER_TYPES and (len(selector) == 1 or selector[1] == "/"):
             item_type = selector[0]
             selector = selector[1:]
         elif not selector.startswith("/"):
@@ -94,14 +136,19 @@ def gopher_fetch(target, flow_uart):
         hostport = url
         selector = ""
 
+    canon_url = f"gopher://{hostport}/{item_type}{selector}"
+    if nav is not None:
+        nav.set_page(canon_url, push_history=push_history)
+
     host, port = parse_host_port(hostport, 70)
     addr = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)[0][-1]
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(10.0)
+    flow_uart.reset_pager()
     try:
         sock.connect(addr)
-        req = (selector + "\r\n").encode("utf-8")
-        sock.sendall(req)
+        req_sel = f"{selector}\t{query}" if query else selector
+        sock.sendall((req_sel + "\r\n").encode("utf-8"))
 
         for raw_line in stream_socket_lines(sock, flow_uart):
             if flow_uart.check_abort():
@@ -109,37 +156,48 @@ def gopher_fetch(target, flow_uart):
                 break
             if raw_line == b".":
                 break
-            # Format Gopher directory lines if tab-delimited, otherwise print raw text
-            if b"\t" in raw_line and item_type == "1":
+            if b"\t" in raw_line and item_type in ("1", "7"):
                 parts = raw_line.decode("utf-8", "replace").split("\t")
                 if parts and len(parts[0]) >= 1:
                     t_ch = parts[0][0]
                     display = parts[0][1:]
                     sel = parts[1] if len(parts) > 1 else ""
-                    h = parts[2] if len(parts) > 2 else ""
+                    h = parts[2] if len(parts) > 2 else host
                     p = parts[3] if len(parts) > 3 else "70"
                     if t_ch == "i":
-                        flow_uart.write_paced((display + "\r\n").encode("utf-8"))
+                        if not flow_uart.write_line_paged("       " + display):
+                            break
                     else:
-                        tag = GOPHER_TYPES.get(t_ch, f"[{t_ch}]")
-                        loc = f"{h}:{p}{sel}" if p != "70" else f"{h}{sel}"
-                        line_out = f"[{tag}] {display}\r\n      -> {loc}\r\n"
-                        flow_uart.write_paced(line_out.encode("utf-8"))
+                        tag = GOPHER_TYPES.get(t_ch, t_ch)
+                        hp = f"{h}:{p}" if p != "70" else h
+                        if sel.startswith("URL:"):
+                            link_url = sel[4:]
+                        elif t_ch == "8":
+                            link_url = f"telnet://{hp}"
+                        else:
+                            if not sel.startswith("/"):
+                                sel = "/" + sel
+                            link_url = f"gopher://{hp}/{t_ch}{sel}"
+                        idx = nav.add_link(link_url, display, t_ch) if nav is not None else 0
+                        prefix = f"[{idx:>2d}:{tag}] " if idx else f"[{tag}] "
+                        if not flow_uart.write_line_paged(f"{prefix}{display}"):
+                            break
                     continue
-            flow_uart.write_paced(raw_line + b"\r\n")
+            if not flow_uart.write_line_paged(raw_line.decode("utf-8", "replace")):
+                break
     finally:
         sock.close()
 
 
-def gemini_fetch(url, flow_uart, max_redirects=5):
+def gemini_fetch(url, flow_uart, nav=None, max_redirects=5, push_history=True):
     """
-    Fetch a Gemini (gemini://) document over TLS 1.2+.
-    Automatically follows up to max_redirects 3x redirects.
+    Fetch a Gemini (gemini://) document over TLS 1.2+ and number '=>' links [1], [2], ...
     """
     cur_url = url.strip()
     if not cur_url.startswith("gemini://"):
         cur_url = "gemini://" + cur_url
 
+    flow_uart.reset_pager()
     for _ in range(max_redirects + 1):
         rest = cur_url[9:]
         if "/" in rest:
@@ -160,7 +218,6 @@ def gemini_fetch(url, flow_uart, max_redirects=5):
             tls_sock = ssl.wrap_socket(raw_sock, server_hostname=host)
             tls_sock.write((cur_url + "\r\n").encode("utf-8"))
 
-            # Read Gemini response header line (<STATUS> <META>\r\n)
             hdr = b""
             while b"\n" not in hdr and len(hdr) < 1024:
                 c = tls_sock.read(1)
@@ -173,25 +230,31 @@ def gemini_fetch(url, flow_uart, max_redirects=5):
             status = hdr_str[:2]
             meta = hdr_str[3:].strip() if len(hdr_str) > 3 else ""
 
-            # Handle 3x Redirect
             if status.startswith("3") and meta:
-                if meta.startswith("gemini://"):
-                    cur_url = meta
-                elif meta.startswith("/"):
-                    cur_url = f"gemini://{hostport}{meta}"
-                else:
-                    base = cur_url.rsplit("/", 1)[0]
-                    cur_url = f"{base}/{meta}"
+                cur_url = resolve_url(cur_url, meta)
                 flow_uart.write_paced(f"+REDIRECT: {cur_url}\r\n".encode("utf-8"))
                 continue
 
-            # Stream response body for 2x Success
             if status.startswith("2"):
+                if nav is not None:
+                    nav.set_page(cur_url, push_history=push_history)
+                is_gemtext = meta == "" or "text/gemini" in meta
                 for raw_line in stream_socket_lines(tls_sock, flow_uart):
                     if flow_uart.check_abort():
                         flow_uart.write(b"\r\n^C Aborted\r\n")
                         break
-                    flow_uart.write_paced(raw_line + b"\r\n")
+                    line_s = raw_line.decode("utf-8", "replace")
+                    if is_gemtext and line_s.startswith("=>"):
+                        rem = line_s[2:].strip()
+                        if rem:
+                            parts = rem.split(None, 1)
+                            ref = parts[0]
+                            label = parts[1] if len(parts) > 1 else ref
+                            full_link = resolve_url(cur_url, ref)
+                            idx = nav.add_link(full_link, label, "GMI") if nav is not None else 0
+                            line_s = f"[{idx:>2d}] {label} ({ref})" if idx else f"=> {label}"
+                    if not flow_uart.write_line_paged(line_s):
+                        break
             return
         finally:
             if tls_sock:
@@ -234,6 +297,7 @@ def http_fetch(url, flow_uart):
     raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     raw_sock.settimeout(12.0)
     sock = raw_sock
+    flow_uart.reset_pager()
     try:
         raw_sock.connect(addr)
         if use_tls:
@@ -253,7 +317,161 @@ def http_fetch(url, flow_uart):
             if flow_uart.check_abort():
                 flow_uart.write(b"\r\n^C Aborted\r\n")
                 break
-            flow_uart.write_paced(raw_line + b"\r\n")
+            if not flow_uart.write_line_paged(raw_line.decode("utf-8", "replace")):
+                break
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+        try:
+            raw_sock.close()
+        except Exception:
+            pass
+
+
+def _crc16_xmodem(data):
+    crc = 0
+    for b in data:
+        crc ^= b << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
+            else:
+                crc = (crc << 1) & 0xFFFF
+    return crc
+
+
+def xmodem_send_url(url, flow_uart):
+    """
+    Download a URL (HTTP, HTTPS, or Gopher binary/text) and transmit it to the SC131
+    over UART0 using standard 128-byte XMODEM (supports both Checksum and CRC-16).
+    """
+    u = url.strip()
+    use_tls = False
+    is_gopher = False
+    if u.startswith("https://"):
+        use_tls = True
+        rest = u[8:]
+        default_port = 443
+    elif u.startswith("http://"):
+        rest = u[7:]
+        default_port = 80
+    elif u.startswith("gopher://"):
+        is_gopher = True
+        rest = u[9:]
+        default_port = 70
+    else:
+        rest = u
+        default_port = 80
+
+    if "/" in rest:
+        hostport, path = rest.split("/", 1)
+        path = "/" + path
+    else:
+        hostport = rest
+        path = "/"
+
+    host, port = parse_host_port(hostport, default_port)
+    addr = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)[0][-1]
+    raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    raw_sock.settimeout(12.0)
+    sock = raw_sock
+    try:
+        raw_sock.connect(addr)
+        if use_tls:
+            sock = ssl.wrap_socket(raw_sock, server_hostname=host)
+        if is_gopher:
+            if len(path) >= 2 and path[1] in GOPHER_TYPES and (len(path) == 2 or path[2] == "/"):
+                path = path[2:]
+            req = (path + "\r\n").encode("utf-8")
+        else:
+            req = (
+                f"GET {path} HTTP/1.0\r\n"
+                f"Host: {host}\r\n"
+                f"User-Agent: ttl2wifi/1.0 (PicoW; SC131)\r\n"
+                f"Connection: close\r\n\r\n"
+            ).encode("utf-8")
+        if hasattr(sock, "write"):
+            sock.write(req)
+        else:
+            sock.sendall(req)
+
+        # If HTTP/HTTPS, skip HTTP response headers until \r\n\r\n
+        pre_buf = b""
+        if not is_gopher:
+            while b"\r\n\r\n" not in pre_buf:
+                c = sock.read(128) if hasattr(sock, "read") else sock.recv(128)
+                if not c:
+                    break
+                pre_buf += c
+            if b"\r\n\r\n" in pre_buf:
+                pre_buf = pre_buf.split(b"\r\n\r\n", 1)[1]
+
+        flow_uart.write(b"+XMODEM: Start receiver now (waiting up to 60s for NAK/'C')...\r\n")
+
+        # Wait for receiver initial 'C' (CRC-16) or NAK (Checksum)
+        use_crc = False
+        t0 = time.ticks_ms()
+        while True:
+            if time.ticks_diff(time.ticks_ms(), t0) > 60000:
+                flow_uart.write(b"\r\nERROR: XMODEM receiver timeout\r\n")
+                return
+            b = flow_uart.read_raw_byte(timeout_ms=200)
+            if b == CRC_CHR:
+                use_crc = True
+                break
+            if b == NAK:
+                use_crc = False
+                break
+            if b == CAN:
+                flow_uart.write(b"\r\nERROR: Cancelled by receiver\r\n")
+                return
+
+        blk_num = 1
+        eof_reached = False
+        while not eof_reached:
+            while len(pre_buf) < 128:
+                c = sock.read(128 - len(pre_buf)) if hasattr(sock, "read") else sock.recv(128 - len(pre_buf))
+                if not c:
+                    eof_reached = True
+                    break
+                pre_buf += c
+
+            if len(pre_buf) == 0 and eof_reached:
+                break
+
+            payload = pre_buf[:128]
+            pre_buf = pre_buf[128:]
+            if len(payload) < 128:
+                payload = payload + bytes([0x1A]) * (128 - len(payload))
+
+            hdr = bytes([SOH, blk_num & 0xFF, (255 - (blk_num & 0xFF)) & 0xFF])
+            if use_crc:
+                crc = _crc16_xmodem(payload)
+                pkt = hdr + payload + struct.pack(">H", crc)
+            else:
+                chk = sum(payload) & 0xFF
+                pkt = hdr + payload + bytes([chk])
+
+            for _retry in range(10):
+                flow_uart.write(pkt)
+                resp = flow_uart.read_raw_byte(timeout_ms=10000)
+                if resp == ACK:
+                    blk_num = (blk_num + 1) & 0xFF
+                    break
+                if resp == CAN:
+                    return
+            else:
+                return
+
+        # Send EOT and wait for ACK
+        for _ in range(5):
+            flow_uart.write(bytes([EOT]))
+            if flow_uart.read_raw_byte(timeout_ms=5000) == ACK:
+                break
+        time.sleep_ms(300)
+        flow_uart.write(b"\r\n+XMODEM: Transfer complete\r\n")
     finally:
         try:
             sock.close()
@@ -269,7 +487,7 @@ def ntp_sync(host="pool.ntp.org"):
     """Query NTP server, set machine.RTC(), and return formatted UTC string."""
     import machine
 
-    NTP_DELTA = 2208988800  # 1900-01-01 to 1970-01-01
+    NTP_DELTA = 2208988800
     addr = socket.getaddrinfo(host, 123)[0][-1]
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.settimeout(5.0)
@@ -280,7 +498,6 @@ def ntp_sync(host="pool.ntp.org"):
         data, _ = s.recvfrom(48)
         sec = struct.unpack("!I", data[40:44])[0] - NTP_DELTA
         tm = time.gmtime(sec)
-        # machine.RTC().datetime((year, month, day, weekday, hours, minutes, seconds, subseconds))
         machine.RTC().datetime((tm[0], tm[1], tm[2], tm[6] + 1, tm[3], tm[4], tm[5], 0))
         return f"{tm[0]:04d}-{tm[1]:02d}-{tm[2]:02d} {tm[3]:02d}:{tm[4]:02d}:{tm[5]:02d} UTC"
     finally:
@@ -347,7 +564,6 @@ def _process_telnet_rx(chunk, state, sock, term_type="VT100", width=80, height=2
                 sb_buf.append(b)
         elif mode == "SB_IAC":
             if b == SE:
-                # Handle TERMINAL-TYPE SEND (24, 1) -> IS (24, 0) + term_type
                 if len(sb_buf) >= 2 and sb_buf[0] == OPT_TTYPE and sb_buf[1] == 1:
                     reply.extend(
                         bytes([IAC, SB, OPT_TTYPE, 0])
@@ -388,7 +604,6 @@ def telnet_session(target, flow_uart, term_type="VT100", width=80, height=24):
         last_rx_ms = time.ticks_ms()
 
         while True:
-            # 1. UART -> Telnet socket (escaping 0xFF as 0xFF 0xFF, and checking '+++')
             u_data = flow_uart.read_online()
             if u_data:
                 now = time.ticks_ms()
@@ -405,7 +620,6 @@ def telnet_session(target, flow_uart, term_type="VT100", width=80, height=24):
                     u_data = u_data.replace(b"\xff", b"\xff\xff")
                 sock.sendall(u_data)
 
-            # 2. Telnet socket -> IAC parser -> UART (paced by XON/XOFF)
             try:
                 chunk = sock.recv(256)
                 if chunk == b"":
@@ -428,5 +642,3 @@ def telnet_session(target, flow_uart, term_type="VT100", width=80, height=24):
             sock.close()
         except Exception:
             pass
-
-

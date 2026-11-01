@@ -10,7 +10,7 @@ import network
 import protocols
 import ssh
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 CONFIG_FILE = "config.json"
 UART_BAUD = 115200
 
@@ -21,15 +21,17 @@ CTRL_C = 0x03
 
 class FlowUART:
     """
-    UART0 wrapper supporting configurable flow control:
+    UART0 wrapper supporting configurable flow control and optional screen pagination:
       - mode 0 (AT&K0): None (transparent 8-bit binary)
       - mode 3 (AT&K3): Hardware RTS/CTS on GP2 (CTS) and GP3 (RTS)
       - mode 4 (AT&K4): Software XON/XOFF (0x11 / 0x13) [Default]
     """
 
-    def __init__(self, baud=UART_BAUD, flow_mode=4):
+    def __init__(self, baud=UART_BAUD, flow_mode=4, page_lines=0):
         self.baud = baud
         self.flow_mode = flow_mode
+        self.page_lines = page_lines
+        self.cur_line = 0
         self.paused = False
         self.aborted = False
         self.rx_queue = bytearray()
@@ -70,6 +72,10 @@ class FlowUART:
                 rxbuf=2048,
             )
 
+    def reset_pager(self):
+        self.cur_line = 0
+        self.aborted = False
+
     def _drain_hw_rx(self, intercept_ctrl_c=False):
         while self.uart.any():
             raw = self.uart.read()
@@ -97,6 +103,22 @@ class FlowUART:
             return True
         return False
 
+    def read_raw_byte(self, timeout_ms=1000):
+        """Read a single raw 8-bit byte directly (used by XMODEM)."""
+        t0 = time.ticks_ms()
+        while True:
+            if self.rx_queue:
+                b = self.rx_queue[0]
+                self.rx_queue = self.rx_queue[1:]
+                return b
+            if self.uart.any():
+                c = self.uart.read(1)
+                if c:
+                    return c[0]
+            if time.ticks_diff(time.ticks_ms(), t0) > timeout_ms:
+                return None
+            time.sleep_ms(5)
+
     def write(self, data):
         if isinstance(data, str):
             data = data.encode("utf-8")
@@ -116,13 +138,33 @@ class FlowUART:
                 while self.paused:
                     time.sleep_ms(5)
                     self._drain_hw_rx(intercept_ctrl_c=True)
-                    # Safety timeout (15s) or Ctrl-C unpauses
                     if self.aborted or time.ticks_diff(time.ticks_ms(), wait_start) > 15000:
                         self.paused = False
                         break
             chunk = mv[off : off + 64]
             self.uart.write(chunk)
             off += len(chunk)
+
+    def write_line_paged(self, line_str):
+        """Write a single line with CR+LF and optional screen pagination (AT+PAGE=<n>)."""
+        self.write_paced(line_str + "\r\n")
+        if self.page_lines > 0:
+            self.cur_line += 1
+            if self.cur_line >= self.page_lines:
+                self.write(b"-- More (Space=page, Enter=1 line, q=quit) --")
+                while True:
+                    b = self.read_raw_byte(timeout_ms=60000)
+                    if b is None or b in (ord("q"), ord("Q"), CTRL_C):
+                        self.write(b"\r                                             \r")
+                        return False
+                    if b in (0x0D, 0x0A):
+                        self.cur_line = self.page_lines - 1
+                        break
+                    if b == 0x20:
+                        self.cur_line = 0
+                        break
+                self.write(b"\r                                             \r")
+        return True
 
     def read_command_bytes(self):
         self._drain_hw_rx(intercept_ctrl_c=False)
@@ -150,15 +192,17 @@ class AtModem:
 
         self.echo = True
         self.flow_mode = 4  # Default AT&K4 (XON/XOFF)
+        self.page_lines = 0
         self.ssid = ""
         self.password = ""
         self.auto_join = True
 
         self.load_config(silent=True)
-        self.io = FlowUART(UART_BAUD, self.flow_mode)
+        self.io = FlowUART(UART_BAUD, self.flow_mode, self.page_lines)
+        self.nav = protocols.BrowserState()
 
         # Online socket state (for ATDT / ATDS / +++ / ATO / ATH)
-        self.mode = "COMMAND"  # "COMMAND" or "ONLINE"
+        self.mode = "COMMAND"
         self.sock = None
         self.raw_sock = None
         self.peer_desc = ""
@@ -171,10 +215,12 @@ class AtModem:
                 cfg = json.load(f)
             self.echo = bool(cfg.get("echo", True))
             self.flow_mode = int(cfg.get("flow_mode", 4))
+            self.page_lines = int(cfg.get("page_lines", 0))
             self.ssid = cfg.get("ssid", "")
             self.password = cfg.get("password", "")
             self.auto_join = bool(cfg.get("auto_join", True))
             if not silent and hasattr(self, "io"):
+                self.io.page_lines = self.page_lines
                 self.io.configure(flow_mode=self.flow_mode)
             return True
         except Exception:
@@ -184,6 +230,7 @@ class AtModem:
         cfg = {
             "echo": self.echo,
             "flow_mode": self.flow_mode,
+            "page_lines": self.page_lines,
             "ssid": self.ssid,
             "password": self.password,
             "auto_join": self.auto_join,
@@ -202,7 +249,6 @@ class AtModem:
         return "&K4 (SW XON/XOFF)"
 
     def parse_quoted_args(self, s):
-        """Parse comma-separated args, stripping optional surrounding quotes."""
         args = []
         cur = []
         in_q = False
@@ -282,6 +328,24 @@ class AtModem:
             self.raw_sock = None
         self.mode = "COMMAND"
 
+    def follow_url(self, url, query=None, push_history=True):
+        if url.startswith("gopher://"):
+            protocols.gopher_fetch(url, self.io, nav=self.nav, query=query, push_history=push_history)
+            self.reply("OK")
+        elif url.startswith("gemini://"):
+            if query:
+                url = f"{url}?{query}"
+            protocols.gemini_fetch(url, self.io, nav=self.nav, push_history=push_history)
+            self.reply("OK")
+        elif url.startswith("http://") or url.startswith("https://"):
+            protocols.http_fetch(url, self.io)
+            self.reply("OK")
+        elif url.startswith("telnet://"):
+            protocols.telnet_session(url, self.io)
+        else:
+            protocols.gopher_fetch(url, self.io, nav=self.nav, query=query, push_history=push_history)
+            self.reply("OK")
+
     def print_help(self):
         self.io.write_paced(
             b"=== TTL2WiFi AT Command Reference ===\r\n"
@@ -290,23 +354,24 @@ class AtModem:
             b"  ATI                - Modem info, MAC, IP & settings\r\n"
             b"  AT? / AT+HELP      - Show this command summary\r\n"
             b"  ATE0 / ATE1        - Command echo Off / On\r\n"
-            b"  AT&K0              - Flow control: None (8-bit binary)\r\n"
-            b"  AT&K3              - Flow control: Hardware RTS/CTS (GP2/GP3)\r\n"
-            b"  AT&K4              - Flow control: Software XON/XOFF (Default)\r\n"
+            b"  AT&K0 / &K3 / &K4  - Flow control: None / HW RTS-CTS / SW XON-XOFF\r\n"
+            b"  AT+PAGE=<lines>    - Screen pager (e.g. AT+PAGE=22, or 0=off)\r\n"
             b"  AT&W / ATZ / AT&F  - Save / Reload / Factory-reset config\r\n"
             b"  ATDT<host>:<port>  - Dial raw TCP stream (+++ to escape)\r\n"
             b"  ATDS<host>:<port>  - Dial TLS stream (+++ to escape)\r\n"
             b"  ATO / ATH          - Return to online socket / Hang up\r\n"
-            b"Extended Wi-Fi & Protocol Commands:\r\n"
+            b"Wi-Fi & Network Commands:\r\n"
             b"  AT+WSCAN           - Scan Wi-Fi access points\r\n"
             b'  AT+WJOIN="ssid","pw" - Connect to Wi-Fi network\r\n'
-            b"  AT+WLEAVE          - Disconnect Wi-Fi\r\n"
-            b"  AT+WSTAT           - Detailed Wi-Fi & IP status\r\n"
+            b"  AT+WLEAVE / +WSTAT - Disconnect / Show Wi-Fi & IP status\r\n"
             b'  AT+WDNS="host"     - DNS lookup\r\n'
             b"  AT+TIME            - Sync RTC via NTP & print UTC time\r\n"
-            b'  AT+GOPHER="url"    - Fetch Gopher menu or file (Ctrl-C aborts)\r\n'
-            b'  AT+GEMINI="url"    - Fetch Gemini page over TLS (Ctrl-C aborts)\r\n'
-            b'  AT+HTTPGET="url"   - Fetch HTTP/HTTPS URL (Ctrl-C aborts)\r\n'
+            b"Protocols, Browsing & File Transfer:\r\n"
+            b'  AT+GOPHER="url"    - Fetch Gopher menu/file (numbers links [1]..[N])\r\n'
+            b'  AT+GEMINI="url"    - Fetch Gemini page over TLS (numbers links [1]..[N])\r\n'
+            b'  AT+GO=<n>[,"qry"]  - Follow numbered link [n] (or AT+BACK / AT+LINKS)\r\n'
+            b'  AT+HTTPGET="url"   - Fetch HTTP/HTTPS URL\r\n'
+            b'  AT+XMODEM="url"    - Download URL via 128B XMODEM (CRC/Checksum)\r\n'
             b'  AT+TELNET="h[:p]"  - Interactive Telnet session (IAC VT100 80x24)\r\n'
             b'  AT+SSH="u@host","pw" - Interactive SSH-2 PTY session\r\n'
         )
@@ -320,7 +385,7 @@ class AtModem:
             f"TTL2WiFi v{VERSION} ({sys.implementation._machine})\r\n"
             f"MAC:  {mac}\r\n"
             f"WiFi: {'CONNECTED' if self.wlan.isconnected() else 'DISCONNECTED'} (SSID={ssid}, IP={ip})\r\n"
-            f"UART: {self.io.baud} 8N1, Echo={'E1' if self.echo else 'E0'}, Flow={self.flow_desc()}\r\n"
+            f"UART: {self.io.baud} 8N1, Echo={'E1' if self.echo else 'E0'}, Flow={self.flow_desc()}, Page={self.page_lines}\r\n"
         )
         self.reply("OK")
 
@@ -332,7 +397,6 @@ class AtModem:
         print(f"[AT CMD] {cmd_raw!r}")
         up = cmd_raw.upper()
 
-        # Convenience alias for interactive users typing 'help'
         if up == "HELP":
             self.print_help()
             return
@@ -368,6 +432,10 @@ class AtModem:
             self.flow_mode = 4
             self.io.configure(flow_mode=4)
             self.reply("OK")
+        elif body_up.startswith("+PAGE="):
+            self.page_lines = max(0, int(body[6:].strip()))
+            self.io.page_lines = self.page_lines
+            self.reply("OK")
         elif body_up == "&W":
             self.save_config()
             self.reply("OK")
@@ -377,6 +445,8 @@ class AtModem:
         elif body_up == "&F":
             self.echo = True
             self.flow_mode = 4
+            self.page_lines = 0
+            self.io.page_lines = 0
             self.io.configure(flow_mode=4)
             self.reply("OK")
         elif body_up == "O":
@@ -443,15 +513,45 @@ class AtModem:
             self.reply("OK")
         elif body_up.startswith("+GOPHER="):
             target = self.parse_quoted_args(body[8:])[0]
-            protocols.gopher_fetch(target, self.io)
+            protocols.gopher_fetch(target, self.io, nav=self.nav)
             self.reply("OK")
         elif body_up.startswith("+GEMINI="):
             target = self.parse_quoted_args(body[8:])[0]
-            protocols.gemini_fetch(target, self.io)
+            protocols.gemini_fetch(target, self.io, nav=self.nav)
+            self.reply("OK")
+        elif body_up.startswith("+GO="):
+            args = self.parse_quoted_args(body[4:])
+            idx = int(args[0])
+            query = args[1] if len(args) > 1 else None
+            if 1 <= idx <= len(self.nav.links):
+                url, _label, _t = self.nav.links[idx - 1]
+                self.io.write_paced(f"+GO [{idx}]: {url}\r\n")
+                self.follow_url(url, query=query, push_history=True)
+            else:
+                self.reply(f"ERROR: Link [{idx}] out of range (1..{len(self.nav.links)})")
+        elif body_up == "+BACK":
+            if self.nav.history:
+                prev_url = self.nav.history.pop()
+                self.io.write_paced(f"+BACK: {prev_url}\r\n")
+                self.follow_url(prev_url, push_history=False)
+            else:
+                self.reply("ERROR: History is empty")
+        elif body_up == "+LINKS":
+            self.io.reset_pager()
+            if not self.nav.links:
+                self.io.write_paced(b"+LINKS: None\r\n")
+            else:
+                for i, (u, lbl, t) in enumerate(self.nav.links, 1):
+                    if not self.io.write_line_paged(f"[{i:>2d}:{t}] {lbl} -> {u}"):
+                        break
             self.reply("OK")
         elif body_up.startswith("+HTTPGET="):
             target = self.parse_quoted_args(body[9:])[0]
             protocols.http_fetch(target, self.io)
+            self.reply("OK")
+        elif body_up.startswith("+XMODEM="):
+            target = self.parse_quoted_args(body[8:])[0]
+            protocols.xmodem_send_url(target, self.io)
             self.reply("OK")
         elif body_up.startswith("+TELNET="):
             target = self.parse_quoted_args(body[8:])[0]
@@ -466,7 +566,6 @@ class AtModem:
             self.reply(f"ERROR: Unknown command AT{body}")
 
     def poll_online(self):
-        # 1. UART -> Socket (with '+++' escape detection)
         u_data = self.io.read_online()
         if u_data:
             now = time.ticks_ms()
@@ -491,7 +590,6 @@ class AtModem:
                 self.io.write_paced(b"\r\nNO CARRIER\r\n")
                 return
 
-        # 2. Socket -> UART (paced by XON/XOFF)
         try:
             chunk = self.sock.read(256) if hasattr(self.sock, "read") else self.sock.recv(256)
             if chunk == b"":
@@ -501,7 +599,6 @@ class AtModem:
             if chunk:
                 self.io.write_paced(chunk)
         except OSError as e:
-            # EAGAIN / EWOULDBLOCK (-11 / 11) on non-blocking socket means no data right now
             if e.args and e.args[0] in (-11, 11, 110, -110):
                 pass
             else:
