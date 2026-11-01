@@ -30,7 +30,7 @@ run:
 	$(VENV)/python3 scripts/swd_repl.py --run src/main.py
 
 sync:
-	$(VENV)/python3 scripts/swd_repl.py --put src/main.py main.py
+	$(VENV)/python3 scripts/swd_repl.py --sync src
 
 deploy deploy-swd:
 	$(VENV)/python3 scripts/deploy_swd.py

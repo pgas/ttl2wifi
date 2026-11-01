@@ -194,11 +194,28 @@ def put_file(ocd: OpenOcdTcl, shm_addr: int, local_path: str, remote_path: str) 
     time.sleep(0.1)
 
 
+def sync_dir(ocd: OpenOcdTcl, shm_addr: int, src_dir: str) -> None:
+    from pathlib import Path
+
+    root = Path(src_dir)
+    files = [p for p in sorted(root.glob("*.py")) if p.name != "boot.py"]
+    lines = ["import binascii"]
+    for p in files:
+        data = p.read_bytes()
+        b64 = binascii.b2a_base64(data, newline=False).decode("ascii")
+        lines.append(f"with open({p.name!r}, 'wb') as f: f.write(binascii.a2b_base64({b64!r}))")
+        lines.append(f"print('Synced {p.name} ({len(data)} B)')")
+    exec_raw(ocd, shm_addr, ("\n".join(lines) + "\n").encode("utf-8"))
+    push_rx(ocd, shm_addr, b"\x04")
+    time.sleep(0.1)
+
+
 def main():
     parser = argparse.ArgumentParser(description="MicroPython REPL over SWD Debug Probe")
     parser.add_argument("-c", "--command", help="Execute a Python snippet over SWD")
     parser.add_argument("-r", "--run", help="Execute a local .py file on the target over SWD")
     parser.add_argument("-p", "--put", nargs=2, metavar=("LOCAL", "REMOTE"), help="Upload a file to the target over SWD")
+    parser.add_argument("-s", "--sync", metavar="DIR", help="Sync all .py files in DIR to the target over SWD")
     parser.add_argument("--reset", action="store_true", help="Soft-reboot the target Pico W over SWD")
     args = parser.parse_args()
 
@@ -225,6 +242,10 @@ def main():
 
         if args.put is not None:
             put_file(ocd, shm_addr, args.put[0], args.put[1])
+            return
+
+        if args.sync is not None:
+            sync_dir(ocd, shm_addr, args.sync)
             return
 
         print(f"Connected to Pico W MicroPython REPL over SWD (shm @ 0x{shm_addr:08x}). Press Ctrl-] to exit.\r")
