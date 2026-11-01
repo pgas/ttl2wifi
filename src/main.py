@@ -182,6 +182,24 @@ class FlowUART:
         self.rx_queue = bytearray()
         return out
 
+    def read_hidden_line(self, prompt="Password: "):
+        """Read a line from UART without echoing characters (for interactive SSH password prompt)."""
+        self.write(prompt)
+        buf = bytearray()
+        while True:
+            b = self.read_raw_byte(timeout_ms=60000)
+            if b is None or b == CTRL_C:
+                self.write(b"\r\n")
+                return None
+            if b in (0x0D, 0x0A):
+                self.write(b"\r\n")
+                return buf.decode("utf-8", "replace")
+            if b in (0x08, 0x7F):
+                if len(buf) > 0:
+                    buf = buf[:-1]
+            elif 0x20 <= b <= 0x7E:
+                buf.append(b)
+
 
 class AtModem:
     def __init__(self):
@@ -373,6 +391,7 @@ class AtModem:
             b'  AT+HTTPGET="url"   - Fetch HTTP/HTTPS URL\r\n'
             b'  AT+XMODEM="url"    - Download URL via 128B XMODEM (CRC/Checksum)\r\n'
             b'  AT+TELNET="h[:p]"  - Interactive Telnet session (IAC VT100 80x24)\r\n'
+            b'  AT+TELNET="h[:p]"  - Interactive Telnet session (IAC VT100 80x24)\r\n'
             b'  AT+SSH="u@host","pw" - Interactive SSH-2 PTY session\r\n'
         )
         self.reply("OK")
@@ -556,12 +575,21 @@ class AtModem:
         elif body_up.startswith("+TELNET="):
             target = self.parse_quoted_args(body[8:])[0]
             protocols.telnet_session(target, self.io)
+        elif body_up.startswith("+TELNET="):
+            target = self.parse_quoted_args(body[8:])[0]
+            protocols.telnet_session(target, self.io)
         elif body_up.startswith("+SSH="):
             args = self.parse_quoted_args(body[5:])
             if len(args) >= 2:
                 ssh.ssh_connect_and_run(args[0], args[1], self.io)
+            elif len(args) == 1 and args[0]:
+                pw = self.io.read_hidden_line("Password: ")
+                if pw is not None:
+                    ssh.ssh_connect_and_run(args[0], pw, self.io)
+                else:
+                    self.reply("ERROR: Aborted")
             else:
-                self.reply('ERROR: Usage AT+SSH="user@host[:port]","password"')
+                self.reply('ERROR: Usage AT+SSH="user@host[:port]"[,"password"]')
         else:
             self.reply(f"ERROR: Unknown command AT{body}")
 

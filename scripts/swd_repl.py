@@ -114,9 +114,11 @@ def push_rx(ocd: OpenOcdTcl, shm_addr: int, data: bytes) -> None:
             time.sleep(0.015)
             continue
         chunk = data[offset : offset + min(free, 256)]
-        for b in chunk:
-            ocd.write_u8(shm_addr + 16 + BUF_SIZE + rx_head, bytes([b]))
-            rx_head = (rx_head + 1) & (BUF_SIZE - 1)
+        first_len = min(len(chunk), BUF_SIZE - rx_head)
+        ocd.write_u8(shm_addr + 16 + BUF_SIZE + rx_head, chunk[:first_len])
+        if first_len < len(chunk):
+            ocd.write_u8(shm_addr + 16 + BUF_SIZE, chunk[first_len:])
+        rx_head = (rx_head + len(chunk)) & (BUF_SIZE - 1)
         ocd.write_u32(shm_addr + 8, [rx_head])
         offset += len(chunk)
 
@@ -179,15 +181,24 @@ def exec_raw(ocd: OpenOcdTcl, shm_addr: int, code: bytes) -> None:
     drain_tx(ocd, shm_addr)
 
 
+def _chunked_write_script(filename: str, data: bytes) -> str:
+    lines = [
+        "import binascii, gc",
+        "gc.collect()",
+        f"f = open({filename!r}, 'wb')",
+    ]
+    for off in range(0, len(data), 768):
+        b64 = binascii.b2a_base64(data[off : off + 768], newline=False).decode("ascii")
+        lines.append(f"f.write(binascii.a2b_base64({b64!r}))")
+    lines.append("f.close()")
+    lines.append("gc.collect()")
+    lines.append(f"print('Synced {filename} ({len(data)} bytes)')")
+    return "\n".join(lines) + "\n"
+
+
 def put_file(ocd: OpenOcdTcl, shm_addr: int, local_path: str, remote_path: str) -> None:
     data = open(local_path, "rb").read()
-    b64 = binascii.b2a_base64(data, newline=False).decode("ascii")
-    script = (
-        f"import binascii\n"
-        f"with open({remote_path!r}, 'wb') as f:\n"
-        f"    f.write(binascii.a2b_base64({b64!r}))\n"
-        f"print('Synced {local_path} -> :{remote_path} ({len(data)} bytes)')\n"
-    )
+    script = _chunked_write_script(remote_path, data)
     exec_raw(ocd, shm_addr, script.encode("utf-8"))
     # Trigger a MicroPython soft-reboot (Ctrl-D) so boot.py + new main.py start cleanly
     push_rx(ocd, shm_addr, b"\x04")
@@ -199,13 +210,9 @@ def sync_dir(ocd: OpenOcdTcl, shm_addr: int, src_dir: str) -> None:
 
     root = Path(src_dir)
     files = [p for p in sorted(root.glob("*.py")) if p.name != "boot.py"]
-    lines = ["import binascii"]
     for p in files:
-        data = p.read_bytes()
-        b64 = binascii.b2a_base64(data, newline=False).decode("ascii")
-        lines.append(f"with open({p.name!r}, 'wb') as f: f.write(binascii.a2b_base64({b64!r}))")
-        lines.append(f"print('Synced {p.name} ({len(data)} B)')")
-    exec_raw(ocd, shm_addr, ("\n".join(lines) + "\n").encode("utf-8"))
+        script = _chunked_write_script(p.name, p.read_bytes())
+        exec_raw(ocd, shm_addr, script.encode("utf-8"))
     push_rx(ocd, shm_addr, b"\x04")
     time.sleep(0.1)
 
