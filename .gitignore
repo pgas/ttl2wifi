@@ -1,0 +1,12 @@
+# Python & virtualenv
+.venv/
+__pycache__/
+*.py[cod]
+
+# Firmware & generated flash images
+firmware/*.uf2
+firmware/*.bin
+firmware/*.hex
+
+# macOS
+.DS_Store
