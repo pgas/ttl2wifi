@@ -23,11 +23,11 @@ class FlowUART:
     """
     UART0 wrapper supporting configurable flow control and optional screen pagination:
       - mode 0 (AT&K0): None (transparent 8-bit binary)
-      - mode 3 (AT&K3): Hardware RTS/CTS on GP2 (CTS) and GP3 (RTS)
-      - mode 4 (AT&K4): Software XON/XOFF (0x11 / 0x13) [Default]
+      - mode 3 (AT&K3): Hardware RTS/CTS on GP2 (CTS) and GP3 (RTS) [Default]
+      - mode 4 (AT&K4): Software XON/XOFF (0x11 / 0x13)
     """
 
-    def __init__(self, baud=UART_BAUD, flow_mode=4, page_lines=0):
+    def __init__(self, baud=UART_BAUD, flow_mode=3, page_lines=0):
         self.baud = baud
         self.flow_mode = flow_mode
         self.page_lines = page_lines
@@ -209,7 +209,7 @@ class AtModem:
         self.wlan.active(True)
 
         self.echo = True
-        self.flow_mode = 4  # Default AT&K4 (XON/XOFF)
+        self.flow_mode = 3  # Default AT&K3 (Hardware RTS/CTS)
         self.page_lines = 0
         self.ssid = ""
         self.password = ""
@@ -232,7 +232,7 @@ class AtModem:
             with open(CONFIG_FILE, "r") as f:
                 cfg = json.load(f)
             self.echo = bool(cfg.get("echo", True))
-            self.flow_mode = int(cfg.get("flow_mode", 4))
+            self.flow_mode = int(cfg.get("flow_mode", 3))
             self.page_lines = int(cfg.get("page_lines", 0))
             self.ssid = cfg.get("ssid", "")
             self.password = cfg.get("password", "")
@@ -400,11 +400,14 @@ class AtModem:
         mac = ":".join(f"{b:02x}" for b in self.wlan.config("mac"))
         ip = self.wlan.ifconfig()[0] if self.wlan.isconnected() else "0.0.0.0"
         ssid = self.wlan.config("ssid") if self.wlan.isconnected() else "none"
+        cts_v = machine.Pin(2).value()
+        rts_v = machine.Pin(3).value()
         self.io.write_paced(
             f"TTL2WiFi v{VERSION} ({sys.implementation._machine})\r\n"
             f"MAC:  {mac}\r\n"
             f"WiFi: {'CONNECTED' if self.wlan.isconnected() else 'DISCONNECTED'} (SSID={ssid}, IP={ip})\r\n"
             f"UART: {self.io.baud} 8N1, Echo={'E1' if self.echo else 'E0'}, Flow={self.flow_desc()}, Page={self.page_lines}\r\n"
+            f"PINS: GP2/CTS={cts_v} ({'CLEAR' if cts_v == 0 else 'PAUSED'}), GP3/RTS={rts_v} ({'READY' if rts_v == 0 else 'BUSY'})\r\n"
         )
         self.reply("OK")
 
@@ -463,10 +466,10 @@ class AtModem:
             self.reply("OK")
         elif body_up == "&F":
             self.echo = True
-            self.flow_mode = 4
+            self.flow_mode = 3
             self.page_lines = 0
             self.io.page_lines = 0
-            self.io.configure(flow_mode=4)
+            self.io.configure(flow_mode=3)
             self.reply("OK")
         elif body_up == "O":
             if self.sock:

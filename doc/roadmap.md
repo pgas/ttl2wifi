@@ -47,11 +47,18 @@ This document tracks the architecture and command set for the **TTL2WiFi** bridg
   - Fetch HTTP or HTTPS URLs and stream response headers + body over UART
 - [x] **XMODEM File Downloader (`AT+XMODEM="<url>"`):**
   - Fetch any HTTP/HTTPS/Gopher file over Wi-Fi and transmit it over `UART0` using 128-byte XMODEM (supports both CRC-16 `'C'` and Checksum `NAK` for CP/M `XM.COM`)
+- [x] **HTTP/HTTPS Client (`AT+HTTPGET="http(s)://<host>/<path>"`):**
+  - Fetch HTTP or HTTPS URLs and stream response headers + body over UART
+- [x] **XMODEM File Downloader (`AT+XMODEM="<url>"`):**
+  - Fetch any HTTP/HTTPS/Gopher file over Wi-Fi and transmit it over `UART0` using 128-byte XMODEM (supports both CRC-16 `'C'` and Checksum `NAK` for CP/M `XM.COM`)
 
 ## Phase 5: Built-in SSH-2 Client (`AT+SSH`)
 - [x] **Pure MicroPython SSH-2 Client (`src/ssh.py`) using built-in C crypto primitives (`pow`, `cryptolib.aes`, `hashlib.sha256`):**
+  - Key exchange: `diffie-hellman-group14-sha256`
   - Key exchange: `curve25519-sha256` (RFC 7748 / RFC 8731) and `diffie-hellman-group14-sha256` (RFC 8268)
   - Cipher & MAC: `aes128-ctr` + `hmac-sha2-256`
+  - Authentication: Password / keyboard-interactive auth (`ssh-userauth`)
   - Authentication: Password / keyboard-interactive auth (`ssh-userauth`) with hidden `Password:` prompt
   - Session: Request `vt100` PTY (`80x24`) + interactive `shell` channel bridged to `UART0`
+  - Command: `AT+SSH="user@host[:port]","password"`
   - Command: `AT+SSH="user@host[:port]"[,"password"]`

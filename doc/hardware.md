@@ -1,29 +1,8 @@
 # Hardware Wiring: SC131 (5V TTL) to Raspberry Pi Pico W
 
-## 1. Schematic (`UART0` + `VSYS` Power)
-## 1. Schematic (`UART0` + `VSYS` Power + Optional `RTS`/`CTS` Flow Control)
+## 1. Schematic (`UART0` + `VSYS` Power + Hardware `RTS`/`CTS` Flow Control)
 
 ```text
-SC131 Header (5V TTL)                                         Raspberry Pi Pico W
-+-----------------------+                                      +--------------------+
-|                       |                                      |                    |
-| Pin 3: 5V ------------+--------------------+-----------------+-- Pin 39: VSYS     |
-|                       |                    |                 |                    |
-|                       |                 +--+--+              |                    |
-|                       |                 |  +  |              |                    |
-|                       |              [ 470 µF ]              |                    |
-|                       |                 |  -  |              |                    |
-|                       |                 +--+--+              |                    |
-|                       |                    |                 |                    |
-| Pin 1: GND -----------+----------+---------+-----------------+-- Pin 38: GND      |
-|                       |          |                           |                    |
-|                       |        [ 2kΩ ]                       |                    |
-|                       |          |                           |                    |
-| Pin 5: RXD (SC131 TX) +-[ 1kΩ ]--+--------------------------->-- Pin 2:  GP1 (RX) |
-|                       |                                      |                    |
-| Pin 4: TXD (SC131 RX) <--------------------------------------+-- Pin 1:  GP0 (TX) |
-|                       |                                      |                    |
-+-----------------------+                                      +--------------------+
 SC131 Header (5V TTL, FTDI Pinout)                           Raspberry Pi Pico W
 +-------------------------------+                            +-------------------------+
 |                               |                            |                         |
@@ -51,6 +30,24 @@ SC131 Header (5V TTL, FTDI Pinout)                           Raspberry Pi Pico W
 |                               |                            |                         |
 +-------------------------------+                            +-------------------------+
 ```
+
+> **Important Note on SC131 vs. USB-to-TTL Adapter Pin Labels:**
+> The **SC131** 6-pin serial header is designed for a straight-through FTDI cable, so the **SC131 PCB silkscreen labels each pin with the FTDI cable's signal name**, *not* the SC131's own signal direction:
+> - SC131 **Pin 5 (`RXD` on silkscreen)** is actually the **SC131's `TX` output** (connects to FTDI `RXD`).
+> - SC131 **Pin 4 (`TXD` on silkscreen)** is actually the **SC131's `RX` input** (connects to FTDI `TXD`).
+> - SC131 **Pin 2 (`CTS` on silkscreen)** is actually the **SC131's `RTS` output** (connects to FTDI `CTS`).
+> - SC131 **Pin 6 (`RTS` on silkscreen)** is actually the **SC131's `CTS` input** (connects to FTDI `RTS`).
+>
+> When testing with a **USB-to-TTL Adapter** on a computer instead of the SC131, the adapter's pins are labeled with the **adapter's own signals** (`TX` = output, `RX` = input, `RTS` = output, `CTS` = input), so **both `TX`/`RX` and `RTS`/`CTS` cross over**:
+>
+> | Pico W Pin | Pico W Signal | Direction | SC131 Header Pin (Silkscreen) | USB-to-TTL Adapter Pin | Level Shifting |
+> | :--- | :--- | :--- | :--- | :--- | :--- |
+> | **Pin 39** | `VSYS` | Power In | **Pin 3 (`5V`)** | `5V` / `VCC` | `470 µF` decoupling cap to `GND` |
+> | **Pin 38 / 3** | `GND` | Ground | **Pin 1 (`GND`)** | `GND` | Common ground |
+> | **Pin 1** | `GP0` (`UART0 TX`) | 3.3V Out | **Pin 4 (`TXD` = SC131 RX in)** | **`RX` / `RXD`** (Adapter in) | Direct wire |
+> | **Pin 2** | `GP1` (`UART0 RX`) | 3.3V In | **Pin 5 (`RXD` = SC131 TX out)** | **`TX` / `TXD`** (Adapter out) | `1 kΩ` series + `2 kΩ` to `GND` |
+> | **Pin 4** | `GP2` (`UART0 CTS`) | 3.3V In | **Pin 2 (`CTS` = SC131 RTS out)** | **`RTS`** (Adapter out) | `1 kΩ` series + `2 kΩ` to `GND` |
+> | **Pin 5** | `GP3` (`UART0 RTS`) | 3.3V Out | **Pin 6 (`RTS` = SC131 CTS in)** | **`CTS`** (Adapter in) | Direct wire |
 
 ## 2. Signal & Electrical Notes
 

@@ -6,8 +6,8 @@ A MicroPython **5V TTL-to-Wi-Fi Hayes `AT` modem and retro/small-web protocol br
 
 - **Classic Hayes `AT` Modem Compatibility:** Works with standard CP/M & retro terminal software (`QTERM`, `MEX`, `IMP`, `Kermit`, `minicom`) using `AT`, `ATI`, `ATE0`/`ATE1`, `ATDT<host>:<port>`, `+++`, `ATO`, and `ATH`.
 - **Configurable Flow Control (`AT&K<n>`) & Pager (`AT+PAGE=<n>`):**
-  - `AT&K4` *(Default)* — Software `XON`/`XOFF` (`Ctrl-S` / `Ctrl-Q`)
-  - `AT&K3` — Hardware `RTS`/`CTS` on `GP2` (`CTS`) and `GP3` (`RTS`)
+  - `AT&K3` *(Default)* — Hardware `RTS`/`CTS` on `GP2` (`CTS`) and `GP3` (`RTS`)
+  - `AT&K4` — Software `XON`/`XOFF` (`Ctrl-S` / `Ctrl-Q`)
   - `AT&K0` — None (transparent 8-bit binary path)
   - `AT+PAGE=22` — Built-in `-- More --` screen paginator for 24-row terminals
 - **Offloaded TLS & Built-in Protocol Clients:**
@@ -37,7 +37,7 @@ A MicroPython **5V TTL-to-Wi-Fi Hayes `AT` modem and retro/small-web protocol br
 | :--- | :--- |
 | `AT` / `ATI` / `AT?` | Attention check / Modem status & info / Command help |
 | `ATE0` / `ATE1` | Disable / Enable command echo |
-| `AT&K0` / `AT&K3` / `AT&K4` | Flow control: None (`&K0`), HW `RTS`/`CTS` (`&K3`), SW `XON`/`XOFF` (`&K4`, default) |
+| `AT&K0` / `AT&K3` / `AT&K4` | Flow control: None (`&K0`), HW `RTS`/`CTS` (`&K3`, default), SW `XON`/`XOFF` (`&K4`) |
 | `AT+PAGE=<lines>` | Pause output every `<lines>` rows (`e.g. AT+PAGE=22`; `0` = continuous) |
 | `AT&W` / `ATZ` / `AT&F` | Save settings to `config.json` / Reload saved config / Factory defaults |
 | `AT+WSCAN` | Scan nearby 2.4 GHz Wi-Fi access points |
