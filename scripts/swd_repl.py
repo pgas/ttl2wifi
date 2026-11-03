@@ -181,28 +181,23 @@ def exec_raw(ocd: OpenOcdTcl, shm_addr: int, code: bytes) -> None:
     drain_tx(ocd, shm_addr)
 
 
-def _chunked_write_script(filename: str, data: bytes) -> str:
-    lines = [
-        "import binascii, gc",
-        "gc.collect()",
-        f"f = open({filename!r}, 'wb')",
-    ]
+def _upload_file_chunked(ocd: OpenOcdTcl, shm_addr: int, filename: str, data: bytes) -> None:
+    exec_raw(ocd, shm_addr, f"import binascii, gc; gc.collect(); _f = open({filename!r}, 'wb')\n".encode("utf-8"))
     for off in range(0, len(data), 768):
         b64 = binascii.b2a_base64(data[off : off + 768], newline=False).decode("ascii")
-        lines.append(f"f.write(binascii.a2b_base64({b64!r}))")
-    lines.append("f.close()")
-    lines.append("gc.collect()")
-    lines.append(f"print('Synced {filename} ({len(data)} bytes)')")
-    return "\n".join(lines) + "\n"
+        exec_raw(ocd, shm_addr, f"_f.write(binascii.a2b_base64({b64!r}))\n".encode("utf-8"))
+    exec_raw(
+        ocd,
+        shm_addr,
+        f"_f.close(); del _f; gc.collect(); print('Synced {filename} ({len(data)} bytes)')\n".encode("utf-8"),
+    )
 
 
 def put_file(ocd: OpenOcdTcl, shm_addr: int, local_path: str, remote_path: str) -> None:
     data = open(local_path, "rb").read()
-    script = _chunked_write_script(remote_path, data)
-    exec_raw(ocd, shm_addr, script.encode("utf-8"))
-    # Trigger a MicroPython soft-reboot (Ctrl-D) so boot.py + new main.py start cleanly
-    push_rx(ocd, shm_addr, b"\x04")
-    time.sleep(0.1)
+    _upload_file_chunked(ocd, shm_addr, remote_path, data)
+    # Hardware reset via SWD so boot.py + new main.py start with a clean heap
+    ocd.cmd("reset run")
 
 
 def sync_dir(ocd: OpenOcdTcl, shm_addr: int, src_dir: str) -> None:
@@ -211,10 +206,8 @@ def sync_dir(ocd: OpenOcdTcl, shm_addr: int, src_dir: str) -> None:
     root = Path(src_dir)
     files = [p for p in sorted(root.glob("*.py")) if p.name != "boot.py"]
     for p in files:
-        script = _chunked_write_script(p.name, p.read_bytes())
-        exec_raw(ocd, shm_addr, script.encode("utf-8"))
-    push_rx(ocd, shm_addr, b"\x04")
-    time.sleep(0.1)
+        _upload_file_chunked(ocd, shm_addr, p.name, p.read_bytes())
+    ocd.cmd("reset run")
 
 
 def main():
@@ -234,8 +227,8 @@ def main():
             sys.exit(1)
 
         if args.reset:
-            push_rx(ocd, shm_addr, b"\r\x03\x03\x04")
-            print("Triggered soft-reboot on target Pico W.")
+            ocd.cmd("reset run")
+            print("Triggered hardware reset on target Pico W.")
             return
 
         if args.command is not None:
