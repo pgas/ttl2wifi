@@ -31,12 +31,19 @@ SC131 Header (5V TTL, FTDI Pinout)                           Raspberry Pi Pico W
 +-------------------------------+                            +-------------------------+
 ```
 
-> **Important Note on SC131 vs. USB-to-TTL Adapter Pin Labels:**
-> The **SC131** 6-pin serial header is designed for a straight-through FTDI cable, so the **SC131 PCB silkscreen labels each pin with the FTDI cable's signal name**, *not* the SC131's own signal direction:
-> - SC131 **Pin 5 (`RXD` on silkscreen)** is actually the **SC131's `TX` output** (connects to FTDI `RXD`).
-> - SC131 **Pin 4 (`TXD` on silkscreen)** is actually the **SC131's `RX` input** (connects to FTDI `TXD`).
-> - SC131 **Pin 2 (`CTS` on silkscreen)** is actually the **SC131's `RTS` output** (connects to FTDI `CTS`).
-> - SC131 **Pin 6 (`RTS` on silkscreen)** is actually the **SC131's `CTS` input** (connects to FTDI `RTS`).
+> **Important Notes on SC131 Header & Port B Operation:**
+> 1. **Silkscreen Pinout (`0v Rt 5v Rx Tx Ct`):**
+>    The SC131 PCB silkscreen directly labels the SC131's signals:
+>    - Pin 1: `0v` (GND)
+>    - Pin 2: `Rt` (RTS 5V Output)
+>    - Pin 3: `5v` (Power)
+>    - Pin 4: `Rx` (RXD Input <- Pico `GP0 / TX`)
+>    - Pin 5: `Tx` (TXD 5V Output -> 1kΩ/2kΩ divider -> Pico `GP1 / RX`)
+>    - Pin 6: `Ct` (CTS Input <- Pico `GP3 / RTS`)
+> 2. **Serial Port B 5V Power Jumper (`JP2`):**
+>    Serial Port B's 5V pin is unpowered by default. A jumper shunt must be fitted across **`JP2`** on the SC131 to allow the main board to supply 5V power to the Pico W.
+> 3. **Flow Control & Retro Pacing on Port B (`ASCI1`):**
+>    While Port A (`ASCI0`) routes hardware RTS/CTS to the Z180, Port B (`ASCI1`) does not support hardware flow control in the Z180 CPU layout. To prevent receiver overrun during high-speed transfers without hardware throttling, the Pico firmware implements retro pacing (1-byte chunks with 250 µs inter-byte delay and 10 ms newline delay).
 >
 > When testing with a **USB-to-TTL Adapter** on a computer instead of the SC131, the adapter's pins are labeled with the **adapter's own signals** (`TX` = output, `RX` = input, `RTS` = output, `CTS` = input), so **both `TX`/`RX` and `RTS`/`CTS` cross over**:
 >
@@ -67,4 +74,3 @@ During development on macOS, two independent interfaces are connected to the tar
 | :--- | :--- | :--- | :--- |
 | **1. SWD Debug Probe** | `Debugprobe on Pico (CMSIS-DAP)` | 3-pin `DEBUG` (`SWCLK`, `GND`, `SWDIO`) | Flashing firmware, `make sync`, `make repl` (`SWDTerm` debug console) |
 | **2. USB-to-TTL Adapter** | `/dev/tty.usbmodem08481` (`8086 Consultancy USB-C to UART Adaptor (5v)`) | `VSYS` (Pin 39), `GND` (Pin 38), `GP0` (Pin 1), `GP1` (Pin 2) | Emulates the SC131 5V TTL client (`minicom -D /dev/tty.usbmodem08481 -b 115200`) |
-

@@ -141,9 +141,27 @@ class FlowUART:
                     if self.aborted or time.ticks_diff(time.ticks_ms(), wait_start) > 15000:
                         self.paused = False
                         break
-            chunk = mv[off : off + 64]
+            # Retro Pacing for vintage Z80/Z180 systems (SC131 / RomWBW / CP/M):
+            # 1. Chunk size (1 byte):
+            #    The Z180 ASCI1 hardware only has a 1-character receive data register
+            #    plus shift register (~2 bytes total), and Port B lacks hardware RTS/CTS
+            #    flow control. A burst from the RP2040's 32-byte hardware FIFO immediately
+            #    overruns the Z180 while CP/M's HTALK is busy echoing to ASCI0.
+            # 2. Inter-byte delay (250 us):
+            #    At 115,200 baud, 1 byte takes ~86.8 us. A 250 us pause yields a ~337 us
+            #    inter-character window (~3,000 cps), giving HTALK ample time to read
+            #    Port B and output to Port A without dropping characters.
+            # 3. Newline delay (10 ms on 0x0A / LF):
+            #    Scrolling a terminal display buffer on CP/M or terminal emulators
+            #    takes 5-10 ms. The 10 ms pause prevents the next line's leading
+            #    characters (especially CR 0x0D) from being dropped, preventing staircasing.
+            chunk = mv[off : off + 1]
             self.uart.write(chunk)
-            off += len(chunk)
+            off += 1
+            if chunk[0] == 0x0A:
+                time.sleep_ms(10)
+            else:
+                time.sleep_us(250)
 
     def write_line_paged(self, line_str):
         """Write a single line with CR+LF and optional screen pagination (AT+PAGE=<n>)."""
@@ -390,7 +408,6 @@ class AtModem:
             b'  AT+GO=<n>[,"qry"]  - Follow numbered link [n] (or AT+BACK / AT+LINKS)\r\n'
             b'  AT+HTTPGET="url"   - Fetch HTTP/HTTPS URL\r\n'
             b'  AT+XMODEM="url"    - Download URL via 128B XMODEM (CRC/Checksum)\r\n'
-            b'  AT+TELNET="h[:p]"  - Interactive Telnet session (IAC VT100 80x24)\r\n'
             b'  AT+TELNET="h[:p]"  - Interactive Telnet session (IAC VT100 80x24)\r\n'
             b'  AT+SSH="u@host","pw" - Interactive SSH-2 PTY session\r\n'
         )
