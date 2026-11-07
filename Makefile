@@ -5,9 +5,12 @@ OPENOCD := openocd -f interface/cmsis-dap.cfg -f target/rp2040.cfg -c "adapter s
 FIRMWARE_UF2 := firmware/RPI_PICO_W-v1.24.1.uf2
 FIRMWARE_BIN := firmware/RPI_PICO_W-v1.24.1.bin
 
-.PHONY: help ttl repl run sync deploy reset flash probe
+.PHONY: help ttl repl run sync deploy reset flash probe image uf2
 
 help:
+	@echo "Standalone Drag-and-Drop UF2 Image (BOOTSEL mode - no SWD needed):"
+	@echo "  make image    - Build turnkey firmware/ttl2wifi.uf2 (drag to RPI-RP2 drive)"
+	@echo ""
 	@echo "TTL Serial Client (SC131 / USB-to-TTL Adapter):"
 	@echo "  make ttl      - Open serial terminal on /dev/cu.usbmodem08481 (115200 8N1)"
 	@echo ""
@@ -34,6 +37,9 @@ sync:
 
 deploy deploy-swd:
 	$(VENV)/python3 scripts/deploy_swd.py
+
+image uf2:
+	$(VENV)/python3 scripts/build_uf2.py
 
 probe:
 	$(OPENOCD) -c "init; targets; exit"
