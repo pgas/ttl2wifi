@@ -61,3 +61,4 @@ The Pico W handles all TLS handshakes, certificate management, and AES encryptio
 * Downloads files over HTTP, HTTPS, or Gopher and transmits them directly into CP/M (`XM.COM`) using standard 128-byte XMODEM blocks.
 * Supports both CRC-16 (`'C'`) and additive Checksum (`NAK`).
 * **Inter-byte Pacing (`delay_us`):** Vintage UARTs without hardware flow control (such as SC131 Port B / Z180 ASCI1) have small hardware FIFOs. `delay_us` inserts microsecond pauses between each byte of the 133-byte packet (default: `250` µs) to prevent overruns.
+
