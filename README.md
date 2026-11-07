@@ -26,6 +26,7 @@ A MicroPython **5V TTL-to-Wi-Fi Hayes `AT` modem and retro/small-web protocol br
 ## Documentation
 
 - [**Hardware & SC131 5V TTL Wiring (`doc/hardware.md`)**](doc/hardware.md) — Schematic, 5V-to-3.3V resistor divider calculations, and optional hardware `RTS`/`CTS` flow control.
+- [**XMODEM File Downloads on SC131 (`doc/xmodem.md`)**](doc/xmodem.md) — Workflow for fetching files into CP/M using `HTALK` and `XM R1`.
 - [**SWDTerm: REPL & Sync Over 3-Pin SWD (`doc/swdterm.md`)**](doc/swdterm.md) — Architecture and SRAM shared-memory layout of the 3-pin SWD REPL bridge.
 - [**Project Roadmap & AT Command Spec (`doc/roadmap.md`)**](doc/roadmap.md) — Complete specification of implemented phases and commands.
 

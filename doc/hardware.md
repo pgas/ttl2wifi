@@ -31,6 +31,12 @@ SC131 Header (5V TTL, FTDI Pinout)                           Raspberry Pi Pico W
 +-------------------------------+                            +-------------------------+
 ```
 
+> **Important Note on SC131 vs. USB-to-TTL Adapter Pin Labels:**
+> The **SC131** 6-pin serial header is designed for a straight-through FTDI cable, so the **SC131 PCB silkscreen labels each pin with the FTDI cable's signal name**, *not* the SC131's own signal direction:
+> - SC131 **Pin 5 (`RXD` on silkscreen)** is actually the **SC131's `TX` output** (connects to FTDI `RXD`).
+> - SC131 **Pin 4 (`TXD` on silkscreen)** is actually the **SC131's `RX` input** (connects to FTDI `TXD`).
+> - SC131 **Pin 2 (`CTS` on silkscreen)** is actually the **SC131's `RTS` output** (connects to FTDI `CTS`).
+> - SC131 **Pin 6 (`RTS` on silkscreen)** is actually the **SC131's `CTS` input** (connects to FTDI `RTS`).
 > **Important Notes on SC131 Header & Port B Operation:**
 > 1. **Silkscreen Pinout (`0v Rt 5v Rx Tx Ct`):**
 >    The SC131 PCB silkscreen directly labels the SC131's signals:

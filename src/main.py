@@ -119,6 +119,22 @@ class FlowUART:
                 return None
             time.sleep_ms(5)
 
+    def flush_rx(self):
+        """Discard any buffered or pending UART RX bytes."""
+        self.rx_queue = bytearray()
+        while self.uart.any():
+            self.uart.read()
+
+    def write_paced_bytes(self, data, delay_us=250):
+        """Write raw binary bytes with optional inter-byte microsecond pacing."""
+        if not delay_us or delay_us <= 0:
+            self.uart.write(data)
+            return
+        mv = memoryview(data)
+        for i in range(len(mv)):
+            self.uart.write(mv[i : i + 1])
+            time.sleep_us(delay_us)
+
     def write(self, data):
         if isinstance(data, str):
             data = data.encode("utf-8")
@@ -589,12 +605,13 @@ class AtModem:
             protocols.http_fetch(target, self.io)
             self.reply("OK")
         elif body_up.startswith("+XMODEM="):
-            target = self.parse_quoted_args(body[8:])[0]
-            protocols.xmodem_send_url(target, self.io)
+            args = self.parse_quoted_args(body[8:])
+            target = args[0]
+            delay_us = 250
+            if len(args) > 1 and args[1].isdigit():
+                delay_us = int(args[1])
+            protocols.xmodem_send_url(target, self.io, delay_us=delay_us)
             self.reply("OK")
-        elif body_up.startswith("+TELNET="):
-            target = self.parse_quoted_args(body[8:])[0]
-            protocols.telnet_session(target, self.io)
         elif body_up.startswith("+TELNET="):
             target = self.parse_quoted_args(body[8:])[0]
             protocols.telnet_session(target, self.io)

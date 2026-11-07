@@ -342,10 +342,12 @@ def _crc16_xmodem(data):
     return crc
 
 
-def xmodem_send_url(url, flow_uart):
+def xmodem_send_url(url, flow_uart, delay_us=250):
     """
     Download a URL (HTTP, HTTPS, or Gopher binary/text) and transmit it to the SC131
     over UART0 using standard 128-byte XMODEM (supports both Checksum and CRC-16).
+    Optional delay_us adds an inter-byte delay within each 133-byte packet burst
+    to prevent UART FIFO overrun on retro systems without hardware flow control.
     """
     u = url.strip()
     use_tls = False
@@ -408,14 +410,18 @@ def xmodem_send_url(url, flow_uart):
             if b"\r\n\r\n" in pre_buf:
                 pre_buf = pre_buf.split(b"\r\n\r\n", 1)[1]
 
-        flow_uart.write(b"+XMODEM: Start receiver now (waiting up to 60s for NAK/'C')...\r\n")
+        flow_uart.write_paced(b"+XMODEM: Start receiver now (waiting up to 60s for NAK/'C')...\r\n")
+
+        # Flush any stale or echoed characters from UART before waiting for receiver
+        if hasattr(flow_uart, "flush_rx"):
+            flow_uart.flush_rx()
 
         # Wait for receiver initial 'C' (CRC-16) or NAK (Checksum)
         use_crc = False
         t0 = time.ticks_ms()
         while True:
             if time.ticks_diff(time.ticks_ms(), t0) > 60000:
-                flow_uart.write(b"\r\nERROR: XMODEM receiver timeout\r\n")
+                flow_uart.write_paced(b"\r\nERROR: XMODEM receiver timeout\r\n")
                 return
             b = flow_uart.read_raw_byte(timeout_ms=200)
             if b == CRC_CHR:
@@ -425,7 +431,7 @@ def xmodem_send_url(url, flow_uart):
                 use_crc = False
                 break
             if b == CAN:
-                flow_uart.write(b"\r\nERROR: Cancelled by receiver\r\n")
+                flow_uart.write_paced(b"\r\nERROR: Cancelled by receiver\r\n")
                 return
 
         blk_num = 1
@@ -455,7 +461,10 @@ def xmodem_send_url(url, flow_uart):
                 pkt = hdr + payload + bytes([chk])
 
             for _retry in range(10):
-                flow_uart.write(pkt)
+                if hasattr(flow_uart, "write_paced_bytes"):
+                    flow_uart.write_paced_bytes(pkt, delay_us=delay_us)
+                else:
+                    flow_uart.write(pkt)
                 resp = flow_uart.read_raw_byte(timeout_ms=10000)
                 if resp == ACK:
                     blk_num = (blk_num + 1) & 0xFF
@@ -471,7 +480,7 @@ def xmodem_send_url(url, flow_uart):
             if flow_uart.read_raw_byte(timeout_ms=5000) == ACK:
                 break
         time.sleep_ms(300)
-        flow_uart.write(b"\r\n+XMODEM: Transfer complete\r\n")
+        flow_uart.write_paced(b"\r\n+XMODEM: Transfer complete\r\n")
     finally:
         try:
             sock.close()
