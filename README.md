@@ -59,6 +59,23 @@ AT+XMODEM="http://192.168.1.100:8000/MYFILE.COM"
 
 ---
 
+## Source Layout
+
+| File | Role |
+|---|---|
+| `src/main.py` | Pico W layer: `FlowUART` (UART0, RTS/CTS, XON/XOFF, pacing) and Wi-Fi hooks |
+| `src/modem.py` | Platform-neutral Hayes AT command processor |
+| `src/serialio.py` | Serial I/O base class (pager, Ctrl-C abort, hidden input) |
+| `src/net.py` | Shared socket/TLS/URL helpers, `BrowserState`, MicroPython/CPython shims |
+| `src/gemini.py`, `gopher.py`, `httpget.py`, `telnet.py`, `xmodem.py`, `ssh.py`, `ntp.py` | Protocol clients |
+
+## Host Simulator
+
+[`sim/`](sim/README.md) runs the same `src/` code under CPython (`make sim`), and can boot RomWBW in
+SimH with the emulated bridge on a serial port (`make simh`, needs the included RomWBW patch).
+
+---
+
 ## Documentation
 
 Full documentation is available in the [`docs/`](docs/) directory:

@@ -1,0 +1,180 @@
+diff --git a/Source/HBIOS/acia.asm b/Source/HBIOS/acia.asm
+index 79fba5c5..b69ae549 100644
+--- a/Source/HBIOS/acia.asm
++++ b/Source/HBIOS/acia.asm
+@@ -57,6 +57,8 @@ ACIA_ACIA       .EQU    1
+ ACIA_RTSON      .EQU    %10111111       ; BIT MASK TO ASSERT RTS
+ ACIA_RTSOFF     .EQU    %01000000       ; BIT MASK TO DEASSERT RTS
+ ;
++ACIA_USE_INT    .EQU    (INTMODE == 1) & (!ACIA_POLL)
++;
+ ;--------------------------------------------------------------------------------------------------
+ ;   HBIOS MODULE HEADER
+ ;--------------------------------------------------------------------------------------------------
+@@ -126,7 +128,7 @@ ACIA_INITUNIT:
+         INC     (HL)                    ; INCREMENT IT (FOR NEXT LOOP)
+         LD      (IY),A                  ; UPDATE UNIT NUM
+ ;
+-#IF (INTMODE == 1)
++#IF (ACIA_USE_INT)
+         ; ADD IM1 INT CALL LIST ENTRY
+         LD      L,(IY+8)                ; GET INT HANDLER PTR
+         LD      H,(IY+9)                ; ... INTO HL
+@@ -164,9 +166,9 @@ ACIA_INIT1:
+ ;
+ ; INTERRUPT HANDLERS
+ ;
+-#IF (INTMODE != 1)
++#IF (!ACIA_USE_INT)
+ ;
+-; NO INTERRUPT HANDLERS UNDER INTMODE 0.  GENERATE A PANIC
++; NO INTERRUPT HANDLERS UNDER INTMODE 0 OR POLLED.  GENERATE A PANIC
+ ; IF SOMETHING TRIES TO CALL THEM.
+ ;
+ ACIA0_INT:
+@@ -175,7 +177,7 @@ ACIA1_INT:
+ ;
+ #ENDIF
+ ;
+-#IF (INTMODE == 1)
++#IF (ACIA_USE_INT)
+ ;
+ ACIA0_INT:
+         LD      IY,ACIA0_CFG            ; POINT TO ACIA0 CFG
+@@ -272,7 +274,7 @@ ACIA_FNTBL:
+ ;
+ ;
+ ;
+-#IF (INTMODE != 1)
++#IF (!ACIA_USE_INT)
+ ;
+ ACIA_IN:
+         CALL    ACIA_IST                ; CHAR WAITING?
+@@ -345,7 +347,7 @@ ACIA_OUT:
+ ;
+ ;
+ ;
+-#IF (INTMODE != 1)
++#IF (!ACIA_USE_INT)
+ ;
+ ACIA_IST:
+         LD      C,(IY+3)                ; STATUS PORT
+@@ -533,7 +535,7 @@ ACIA_INITSAFE:
+ ;
+ ACIA_INITGO:
+ ;
+-#IF (INTMODE == 1)
++#IF (ACIA_USE_INT)
+         OR      %10000000               ; ENABLE RCV INT
+ #ENDIF
+ ;
+@@ -553,7 +555,7 @@ ACIA_INITGO:
+         LD      A,(ACIA_CMD)            ; RESTORE CONFIG VALUE
+         OUT     (C),A                   ; DO IT
+ ;
+-#IF (INTMODE == 1)
++#IF (ACIA_USE_INT)
+ ;
+         ; RESET THE RECEIVE BUFFER
+         LD      E,(IY+6)
+@@ -602,16 +604,7 @@ ACIA_DEVICE:
+ ; ACIA DETECTION ROUTINE
+ ;
+ ACIA_DETECT:
+-        LD      A,(IY+3)                ; BASE PORT ADDRESS
+-        LD      C,A                     ; PUT IN C FOR I/O
+-        CALL    ACIA_DETECT2            ; CHECK IT
+-        JR      Z,ACIA_DETECT1          ; FOUND IT, RECORD IT
+-        LD      A,ACIA_NONE             ; NOTHING FOUND
+-        RET                             ; DONE
+-;       
+-ACIA_DETECT1:   
+-        ; ACIA FOUND, RECORD IT 
+-        LD      A,ACIA_ACIA             ; RETURN CHIP TYPE
++        LD      A,ACIA_ACIA             ; RETURN CHIP TYPE (PRESENT)
+         RET                             ; DONE
+ ;
+ ACIA_DETECT2:
+@@ -681,7 +674,7 @@ ACIA_DEV        .DB     0               ; DEVICE NUM USED DURING INIT
+ ACIA_CMD        .DB     0               ; COMMAND PORT SHADOW REGISTER
+ ACIA_NEWCFG     .DW     0               ; TEMP STORE FOR NEW CFG
+ ;
+-#IF (INTMODE != 1)
++#IF (!ACIA_USE_INT)
+ ;
+ ACIA0_RCVBUF    .EQU    0
+ ACIA1_RCVBUF    .EQU    0
+@@ -730,7 +723,7 @@ ACIA0_CFG:
+ ;
+ 	DEVECHO	"ACIA: IO="
+ 	DEVECHO	ACIA0BASE
+-#IF (INTMODE == 1)
++#IF (ACIA_USE_INT)
+ 	DEVECHO	", INTERRUPTS ENABLED"
+ #ENDIF
+ 	DEVECHO	"\n"
+@@ -753,7 +746,7 @@ ACIA1_CFG:
+ ;
+ 	DEVECHO	"ACIA: IO="
+ 	DEVECHO	ACIA1BASE
+-#IF (INTMODE == 1)
++#IF (ACIA_USE_INT)
+ 	DEVECHO	", INTERRUPTS ENABLED"
+ #ENDIF
+ 	DEVECHO	"\n"
+diff --git a/Source/HBIOS/cfg_MASTER.asm b/Source/HBIOS/cfg_MASTER.asm
+index 4e9c10ef..c98640f9 100644
+--- a/Source/HBIOS/cfg_MASTER.asm
++++ b/Source/HBIOS/cfg_MASTER.asm
+@@ -291,6 +291,7 @@ Z2U0CFG		.EQU	DEFSERCFG	; Z2U 0: SERIAL LINE CONFIG
+ Z2U0HFC		.EQU	FALSE		; Z2U 0: ENABLE HARDWARE FLOW CONTROL
+ ;
+ ACIAENABLE	.EQU	FALSE		; ACIA: ENABLE MOTOROLA 6850 ACIA DRIVER (ACIA.ASM)
++ACIA_POLL	.EQU	FALSE		; ACIA: USE POLLED I/O INSTEAD OF INTERRUPTS
+ ACIADEBUG	.EQU	FALSE		; ACIA: ENABLE DEBUG OUTPUT
+ ACIACNT		.EQU	1		; ACIA: NUMBER OF CHIPS TO DETECT (1-2)
+ ACIA0BASE	.EQU	$80		; ACIA 0: REGISTERS BASE ADR
+diff --git a/Source/HBIOS/hbios.asm b/Source/HBIOS/hbios.asm
+index 448770f7..6c70069c 100644
+--- a/Source/HBIOS/hbios.asm
++++ b/Source/HBIOS/hbios.asm
+@@ -9305,14 +9305,14 @@ HB_MODSTART	.EQU	$
+   #INCLUDE "ez80uart.asm"
+ #ENDIF
+ ;
+-#IF (ACIAENABLE)
+-  #INCLUDE "acia.asm"
+-#ENDIF
+-;
+ #IF (SSERENABLE)
+   #INCLUDE "sser.asm"
+ #ENDIF
+ ;
++#IF (ACIAENABLE)
++  #INCLUDE "acia.asm"
++#ENDIF
++;
+ #IF (DLPSERENABLE)
+   #INCLUDE "dlpser.asm"
+ #ENDIF
+diff --git a/Source/HBIOS/Config/SBC_simh_dual.asm b/Source/HBIOS/Config/SBC_simh_dual.asm
+new file mode 100644
+index 00000000..4c81cd1e
+--- /dev/null
++++ b/Source/HBIOS/Config/SBC_simh_dual.asm
+@@ -0,0 +1,15 @@
++;
++;==================================================================================================
++;   ROMWBW BUILD SETTINGS FOR N8VEM SBC W/SIMH SUPPORT AND DUAL SERIAL
++;==================================================================================================
++;
++#INCLUDE "Config/SBC_simh_std.asm"
++
++AUTOCON		.SET	FALSE		; DISABLE CONSOLE TAKEOVER AT LOADER PROMPT
++ACIAENABLE	.SET	TRUE		; ACIA: ENABLE MOTOROLA 6850 ACIA DRIVER (ACIA.ASM)
++ACIA_POLL	.SET	TRUE		; ACIA: USE POLLED I/O (AltairZ80 M2SIO)
++ACIACNT		.SET	1		; ACIA: NUMBER OF CHIPS TO DETECT
++ACIA0BASE	.SET	$10		; ACIA 0: REGISTERS BASE ADR (AltairZ80 M2SIO0)
++ACIA0CLK	.SET	153600		; ACIA 0: OSC FREQ (153600 / 16 = 9600 BAUD)
++ACIA0DIV	.SET	1		; ACIA 0: SERIAL CLOCK DIVIDER
++ACIA0CFG	.SET	SER_9600_8N1	; ACIA 0: SERIAL LINE CONFIG

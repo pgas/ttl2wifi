@@ -5,7 +5,7 @@ OPENOCD := openocd -f interface/cmsis-dap.cfg -f target/rp2040.cfg -c "adapter s
 FIRMWARE_UF2 := firmware/RPI_PICO_W-v1.24.1.uf2
 FIRMWARE_BIN := firmware/RPI_PICO_W-v1.24.1.bin
 
-.PHONY: help ttl repl run sync deploy reset flash probe image uf2
+.PHONY: help ttl repl run sync deploy reset flash probe image uf2 sim simh
 
 help:
 	@echo "Standalone Drag-and-Drop UF2 Image (BOOTSEL mode - no SWD needed):"
@@ -22,6 +22,10 @@ help:
 	@echo "  make reset    - Hard-reset the target Pico W over SWD"
 	@echo "  make flash    - Re-flash MicroPython v1.24.1 (RPI_PICO_W) firmware over SWD"
 	@echo "  make probe    - Test SWD connection to target Pico W"
+	@echo ""
+	@echo "Host Simulator (no hardware, see sim/README.md):"
+	@echo "  make sim      - Run the AT bridge emulator interactively (stdio)"
+	@echo "  make simh     - Run RomWBW in SimH with the bridge emulator on CIO unit 1"
 
 ttl:
 	$(VENV)/python3 -m serial.tools.miniterm /dev/cu.usbmodem08481 115200
@@ -49,3 +53,9 @@ flash: $(FIRMWARE_BIN)
 
 reset:
 	$(VENV)/python3 scripts/swd_repl.py --reset
+
+sim:
+	python3 sim/sim_bridge.py --stdio
+
+simh:
+	./sim/run_sim.sh

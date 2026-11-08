@@ -3,12 +3,16 @@
 # Cipher:   aes128-ctr (via C cryptolib.aes)
 # MAC:      hmac-sha2-256 (via C hashlib.sha256)
 
-import cryptolib
+try:
+    import cryptolib
+except ImportError:
+    cryptolib = None
 import hashlib
 import os
 import socket
 import struct
 import time
+import net
 
 # SSH Message Numbers (RFC 4253 / 4252 / 4254 / 8731)
 SSH_MSG_DISCONNECT = 1
@@ -243,6 +247,8 @@ def ssh_connect_and_run(target, password, flow_uart):
     Connect to user@host[:port], perform SSH-2 KEX (curve25519-sha256 or DH group14)
     + password/keyboard-interactive auth, open a vt100 PTY + shell, and bridge UART0.
     """
+    if cryptolib is None:
+        raise OSError("SSH needs MicroPython cryptolib (not available in simulator)")
     if "@" not in target:
         raise ValueError('Expected "user@host[:port]"')
     user, hostport = target.split("@", 1)

@@ -11,3 +11,6 @@ firmware/*.hex
 # macOS
 .DS_Store
 
+
+# Simulator working files
+build/
