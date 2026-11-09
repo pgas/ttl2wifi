@@ -25,9 +25,8 @@
 | **`AT+WLEAVE`** | — | Disconnect from Wi-Fi. |
 | **`AT+WDNS="host"`** | `"hostname"` | Resolve hostname to IPv4 address via DNS. |
 | **`AT+TIME`** | — | Query NTP (`pool.ntp.org`), set Pico RTC, and print formatted UTC timestamp. |
-| **`ATDT<host>:<port>`** | `<host>:<port>` | Dial raw TCP stream. Returns `CONNECT`. Type `+++` (with 1s guard time) to escape, `ATO` to resume, or `ATH` to disconnect. |
+| **`ATDT<host>:<port>`** | `<host>:<port>` | Dial raw TCP stream. Returns `CONNECT`. Type `+++` (with 1s guard time) to escape, `ATO` to resume, or `ATH` to disconnect. Raw TCP streams can be used directly with host-side Telnet clients such as `ZTELNET` (`ZNetSuite`). |
 | **`ATDS<host>:<port>`** | `<host>:<port>` | Dial TLS-wrapped TCP stream. Encrypts all traffic using Pico W hardware crypto. |
-| **`AT+TELNET="host[:port]"`** | `"host[:port]"` | Interactive Telnet session with RFC 854 IAC negotiation (`VT100`, `80x24` `NAWS`, `SGA`, `ECHO`). Escape with `+++`. |
 | **`AT+GOPHER="host[/sel]"`** | `"host[/selector]"` | Fetch Gopher menu or text file. Menus format item types and index links as `[ 1]`..`[ N]`. |
 | **`AT+GEMINI="gemini://..."`** | `"url"` | Fetch Gemini page over TLS. Follows redirects and numbers links `[ 1]`..`[ N]`. |
 | **`AT+GO=<n>[,"query"]`** | `<index>[,"query"]` | Follow numbered link `<n>` from the current Gopher or Gemini page without retyping URLs. |

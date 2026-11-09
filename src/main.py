@@ -2,7 +2,7 @@
 #
 # Pico W specific layer: UART0 transport (FlowUART) and Wi-Fi / LED hooks (PicoModem).
 # The AT command processor lives in modem.py and the protocol clients in
-# gopher.py, gemini.py, httpget.py, telnet.py, xmodem.py, ssh.py and ntp.py, which
+# gopher.py, gemini.py, httpget.py, xmodem.py, ssh.py and ntp.py, which
 # are shared with the host simulator (sim/sim_bridge.py).
 import sys
 import time

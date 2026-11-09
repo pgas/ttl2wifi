@@ -8,7 +8,7 @@ A MicroPython **5V TTL-to-Wi-Fi Hayes `AT` modem and retro protocol bridge** run
 
 * **Classic Hayes `AT` Modem:** Works with CP/M communications software (`QTERM`, `MEX`, `IMP`, `minicom`) via `AT`, `ATI`, `ATE0/1`, `ATDT<host>:<port>`, `+++`, `ATO`, and `ATH`.
 * **Offloaded TLS 1.2:** Hardware-accelerated modern encryption for retro hosts via `ATDS<host>:<port>` and built-in protocol clients.
-* **Built-in Small-Web Clients:** Interactive numbered link browsing for **Gemini** (`AT+GEMINI`, `AT+GO`) and **Gopher** (`AT+GOPHER`), plus **Telnet** (`AT+TELNET`), **HTTP/HTTPS** (`AT+HTTPGET`), and **SSH-2** (`AT+SSH`).
+* **Built-in Small-Web Clients:** Interactive numbered link browsing for **Gemini** (`AT+GEMINI`, `AT+GO`) and **Gopher** (`AT+GOPHER`), plus **HTTP/HTTPS** (`AT+HTTPGET`) and **SSH-2** (`AT+SSH`).
 * **Direct CP/M File Transfers:** Download files over Wi-Fi directly to disk via 128-byte XMODEM (`AT+XMODEM`) with configurable inter-byte pacing.
 * **Flow Control & Paging:** Hardware RTS/CTS (`AT&K3`), software XON/XOFF (`AT&K4`), or raw 8-bit binary (`AT&K0`), with an optional screen pager (`AT+PAGE=22`).
 
@@ -67,7 +67,7 @@ AT+XMODEM="http://192.168.1.100:8000/MYFILE.COM"
 | `src/modem.py` | Platform-neutral Hayes AT command processor |
 | `src/serialio.py` | Serial I/O base class (pager, Ctrl-C abort, hidden input) |
 | `src/net.py` | Shared socket/TLS/URL helpers, `BrowserState`, MicroPython/CPython shims |
-| `src/gemini.py`, `gopher.py`, `httpget.py`, `telnet.py`, `xmodem.py`, `ssh.py`, `ntp.py` | Protocol clients |
+| `src/gemini.py`, `gopher.py`, `httpget.py`, `xmodem.py`, `ssh.py`, `ntp.py` | Protocol clients |
 
 ## Host Simulator
 

@@ -35,18 +35,12 @@ This document tracks the architecture and command set for the **TTL2WiFi** bridg
 - [x] `ATH` — Hang up / close active socket (`NO CARRIER`)
 
 ## Phase 4: Built-in Retro & Small-Web Protocol Clients + XMODEM
-- [x] **Telnet Client (`AT+TELNET="<host>[:port]"`):**
-  - RFC 854 IAC option negotiation (`ECHO`, `SGA`, `TERMINAL-TYPE = VT100`, `NAWS = 80x24`), `0xFF` escaping, `+++` escape, and `XON`/`XOFF` flow control
 - [x] **Gopher Client (`AT+GOPHER="<host>[:port]/<selector>"`):**
   - Fetch Gopher menus (type `1`), text files (type `0`), or search queries (type `7`), numbering links `[1]..[N]`
 - [x] **Gemini Protocol Client (`AT+GEMINI="gemini://<host>/<path>"`):**
   - Perform TLS handshake + Gemini request (`<URL>\r\n`), follow `3x` redirects, and number `=>` gemtext links `[1]..[N]`
 - [x] **Interactive Link Navigation (`AT+GO=<n>`, `AT+BACK`, `AT+LINKS`):**
-  - Follow numbered links across Gopher, Gemini, HTTP, and Telnet without retyping URLs, plus browsing history stack
-- [x] **HTTP/HTTPS Client (`AT+HTTPGET="http(s)://<host>/<path>"`):**
-  - Fetch HTTP or HTTPS URLs and stream response headers + body over UART
-- [x] **XMODEM File Downloader (`AT+XMODEM="<url>"`):**
-  - Fetch any HTTP/HTTPS/Gopher file over Wi-Fi and transmit it over `UART0` using 128-byte XMODEM (supports both CRC-16 `'C'` and Checksum `NAK` for CP/M `XM.COM`)
+  - Follow numbered links across Gopher, Gemini, and HTTP without retyping URLs, plus browsing history stack
 - [x] **HTTP/HTTPS Client (`AT+HTTPGET="http(s)://<host>/<path>"`):**
   - Fetch HTTP or HTTPS URLs and stream response headers + body over UART
 - [x] **XMODEM File Downloader (`AT+XMODEM="<url>"`):**

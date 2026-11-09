@@ -51,7 +51,7 @@ WORKING_HD1K="$BUILD_SIM_DIR/hd1k.img"
 
 # 4. Inject freshly compiled ZNetSuite binaries (if available)
 if [ -x "$CPMCP" ]; then
-  for app in ztalk zgmi; do
+  for app in ztalk zgmi ztelnet; do
     APP_UC="$(echo "$app" | tr a-z A-Z).COM"
     if [ -f "$ZNET_DIR/bin/$app.com" ]; then
       echo "Updating $APP_UC on working disk..."
@@ -84,6 +84,7 @@ echo "------------------------------------------------------------"
 echo "  Type '2' to boot the hard disk (CP/M A>), then e.g.:"
 echo "    ZTALK 01          talk AT commands to the bridge"
 echo "    ZGMI geminiprotocol.net"
+echo "    ZTELNET <host> [port]"
 echo "  To exit SimH: Ctrl+E, then 'quit'"
 echo "============================================================"
 

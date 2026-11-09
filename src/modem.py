@@ -10,7 +10,6 @@ import httpget
 import net
 import ntp
 import ssh
-import telnet
 import xmodem
 
 VERSION = "1.1.0"
@@ -40,7 +39,6 @@ HELP_TEXT = (
     b'  AT+GO=<n>[,"qry"]  - Follow numbered link [n] (or AT+BACK / AT+LINKS)\r\n'
     b'  AT+HTTPGET="url"   - Fetch HTTP/HTTPS URL\r\n'
     b'  AT+XMODEM="url"    - Download URL via 128B XMODEM (CRC/Checksum)\r\n'
-    b'  AT+TELNET="h[:p]"  - Interactive Telnet session (IAC VT100 80x24)\r\n'
     b'  AT+SSH="u@host","pw" - Interactive SSH-2 PTY session\r\n'
 )
 
@@ -199,8 +197,9 @@ class AtModem:
         elif url.startswith("http://") or url.startswith("https://"):
             httpget.fetch(url, self.io)
         elif url.startswith("telnet://"):
-            telnet.session(url, self.io)
-            return
+            target = url[9:]
+            host, port = net.parse_host_port(target, 23)
+            self.io.write_paced(f"+TELNET: Use ZTELNET or ATDT for {host}:{port}\r\n")
         else:
             gopher.fetch(url, self.io, nav=self.nav, query=query, push_history=push_history)
         self.reply("OK")
@@ -340,8 +339,6 @@ class AtModem:
             delay_us = int(args[1]) if len(args) > 1 and args[1].isdigit() else 250
             xmodem.send_url(args[0], self.io, delay_us=delay_us)
             self.reply("OK")
-        elif body_up.startswith("+TELNET="):
-            telnet.session(parse_quoted_args(body[8:])[0], self.io)
         elif body_up.startswith("+SSH="):
             args = parse_quoted_args(body[5:])
             if len(args) >= 2:
