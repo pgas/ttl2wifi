@@ -223,7 +223,7 @@ void AtModem::tick() {
         uint8_t sock_buf[256];
         int n = active_sock_ ? active_sock_->recv(sock_buf, sizeof(sock_buf), 0) : -1;
         if (n > 0) {
-            io_.write(sock_buf, n);
+            io_.write_paced(sock_buf, n);
         } else if (n == 0 && active_sock_ && !active_sock_->is_connected()) {
             close_socket();
             reply("NO CARRIER");
@@ -279,7 +279,7 @@ void AtModem::handle_command(const std::string& line) {
 
     std::string up = to_upper(raw);
     if (up == "HELP") {
-        io_.write(HELP_TEXT);
+        io_.write_paced(HELP_TEXT);
         reply("OK");
         return;
     }
@@ -295,7 +295,7 @@ void AtModem::handle_command(const std::string& line) {
     if (body_up.empty()) {
         reply("OK");
     } else if (body_up == "?" || body_up == "+HELP") {
-        io_.write(HELP_TEXT);
+        io_.write_paced(HELP_TEXT);
         reply("OK");
     } else if (body_up == "I" || body_up == "I0" || body_up == "I1") {
         write_info();
@@ -347,20 +347,20 @@ void AtModem::handle_command(const std::string& line) {
     } else if (body_up.rfind("D", 0) == 0) {
         dial_stream(body.substr(1), false);
     } else if (body_up == "+WSCAN") {
-        io_.write("+WSCAN: Scanning...\r\n");
+        io_.write_paced("+WSCAN: Scanning...\r\n");
         auto aps = net_.wifi_scan();
         for (const auto& ap : aps) {
             char line_buf[128];
             snprintf(line_buf, sizeof(line_buf), "  ch%-2d  %4d dBm  sec=%-10s  %s\r\n",
                      ap.channel, ap.rssi, ap.security.c_str(), ap.ssid.c_str());
-            io_.write(line_buf);
+            io_.write_paced(line_buf);
         }
         reply("OK");
     } else if (body_up.rfind("+WJOIN=", 0) == 0) {
         auto args = parse_quoted_args(body.substr(7));
         if (!args.empty() && !args[0].empty()) {
             std::string pw = (args.size() > 1) ? args[1] : "";
-            io_.write("+WJOIN: Connecting to " + args[0] + "...\r\n");
+            io_.write_paced("+WJOIN: Connecting to " + args[0] + "...\r\n");
             if (net_.wifi_join(args[0], pw)) {
                 config_.wifi_ssid = args[0];
                 config_.wifi_password = pw;
@@ -377,15 +377,15 @@ void AtModem::handle_command(const std::string& line) {
     } else if (body_up == "+WSTAT") {
         auto st = net_.wifi_status();
         if (st.connected) {
-            io_.write("+WSTAT: Connected\r\n");
-            io_.write("  IP: " + st.ip + "\r\n");
-            io_.write("  Netmask: " + st.netmask + "\r\n");
-            io_.write("  Gateway: " + st.gateway + "\r\n");
-            io_.write("  DNS: " + st.dns + "\r\n");
-            io_.write("  MAC: " + st.mac + "\r\n");
-            io_.write("  RSSI: " + std::to_string(st.rssi) + " dBm\r\n");
+            io_.write_paced("+WSTAT: Connected\r\n");
+            io_.write_paced("  IP: " + st.ip + "\r\n");
+            io_.write_paced("  Netmask: " + st.netmask + "\r\n");
+            io_.write_paced("  Gateway: " + st.gateway + "\r\n");
+            io_.write_paced("  DNS: " + st.dns + "\r\n");
+            io_.write_paced("  MAC: " + st.mac + "\r\n");
+            io_.write_paced("  RSSI: " + std::to_string(st.rssi) + " dBm\r\n");
         } else {
-            io_.write("+WSTAT: Disconnected\r\n");
+            io_.write_paced("+WSTAT: Disconnected\r\n");
         }
         reply("OK");
     } else if (body_up.rfind("+WDNS=", 0) == 0) {
@@ -393,7 +393,7 @@ void AtModem::handle_command(const std::string& line) {
         if (!args.empty() && !args[0].empty()) {
             std::string ip;
             if (net_.resolve_dns(args[0], ip)) {
-                io_.write("+WDNS: " + args[0] + " -> " + ip + "\r\n");
+                io_.write_paced("+WDNS: " + args[0] + " -> " + ip + "\r\n");
                 reply("OK");
             } else {
                 reply("ERROR: DNS resolution failed");
@@ -404,7 +404,7 @@ void AtModem::handle_command(const std::string& line) {
     } else if (body_up == "+TIME") {
         std::string t = net_.get_ntp_time();
         if (!t.empty()) {
-            io_.write("+TIME: " + t + "\r\n");
+            io_.write_paced("+TIME: " + t + "\r\n");
             reply("OK");
         } else {
             reply("ERROR: NTP sync failed");
@@ -433,7 +433,7 @@ void AtModem::handle_command(const std::string& line) {
             const auto* link = (endp != args[0].c_str()) ? nav_.get_link(idx) : nullptr;
             if (link) {
                 std::string q = (args.size() > 1) ? args[1] : "";
-                io_.write("+GO [" + std::to_string(idx) + "]: " + link->url + "\r\n");
+                io_.write_paced("+GO [" + std::to_string(idx) + "]: " + link->url + "\r\n");
                 follow_url(link->url, q, true);
             } else {
                 reply("ERROR: Link [" + args[0] + "] out of range");
@@ -444,7 +444,7 @@ void AtModem::handle_command(const std::string& line) {
     } else if (body_up == "+BACK") {
         if (nav_.has_history()) {
             std::string prev = nav_.pop_history();
-            io_.write("+BACK: " + prev + "\r\n");
+            io_.write_paced("+BACK: " + prev + "\r\n");
             follow_url(prev, "", false);
         } else {
             reply("ERROR: History is empty");
@@ -452,7 +452,7 @@ void AtModem::handle_command(const std::string& line) {
     } else if (body_up == "+LINKS") {
         io_.reset_pager();
         if (nav_.links().empty()) {
-            io_.write("+LINKS: None\r\n");
+            io_.write_paced("+LINKS: None\r\n");
         } else {
             for (size_t i = 0; i < nav_.links().size(); ++i) {
                 const auto& lnk = nav_.links()[i];

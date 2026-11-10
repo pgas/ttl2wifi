@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         modem.init();
-        io.write(modem.banner());
+        io.write_paced(modem.banner());
         while (g_running) {
             modem.tick();
             std::this_thread::sleep_for(std::chrono::microseconds(500));
@@ -95,7 +95,7 @@ int main(int argc, char** argv) {
                 if (io.open_socket(host, port)) {
                     std::cout << "[Desktop] Connected to " << host << ":" << port << std::endl;
                     modem.init();
-                    io.write(modem.banner());
+                    io.write_paced(modem.banner());
                 } else {
                     std::this_thread::sleep_for(std::chrono::milliseconds(500));
                     continue;

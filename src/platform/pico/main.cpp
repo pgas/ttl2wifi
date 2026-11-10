@@ -52,7 +52,7 @@ int main() {
         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
     }
 
-    uart.write(modem.banner());
+    uart.write_paced(modem.banner());
 
     while (true) {
         modem.tick();

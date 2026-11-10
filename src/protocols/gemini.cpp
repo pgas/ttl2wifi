@@ -93,7 +93,7 @@ bool gemini_fetch(const std::string& initial_url, ISerialIO& io, INetwork& net, 
         if (status >= 10 && status <= 19) {
             sock->close();
             std::string prompt = meta.empty() ? "Input: " : (meta + ": ");
-            io.write(prompt);
+            io.write_paced(prompt);
             std::string user_input = io.read_line(true);
             if (user_input.empty()) return false;
             std::string query_url = current_url + "?" + user_input;
@@ -122,7 +122,7 @@ bool gemini_fetch(const std::string& initial_url, ISerialIO& io, INetwork& net, 
 
         while (true) {
             if (io.check_abort()) {
-                io.write("\r\n^C Aborted\r\n");
+                io.write_paced("\r\n^C Aborted\r\n");
                 break;
             }
             int n = sock->recv(&ch, 1, 10000);

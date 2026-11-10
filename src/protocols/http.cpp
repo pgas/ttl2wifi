@@ -54,7 +54,7 @@ bool http_fetch(const std::string& url, ISerialIO& io, INetwork& net) {
 
     while (true) {
         if (io.check_abort()) {
-            io.write("\r\n^C Aborted\r\n");
+            io.write_paced("\r\n^C Aborted\r\n");
             break;
         }
         int n = sock->recv(&ch, 1, 10000);

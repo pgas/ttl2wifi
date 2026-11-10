@@ -35,6 +35,7 @@ public:
     void write(const std::string& str);
     void write(const uint8_t* data, size_t len);
     void write_paced(const std::string& str);
+    void write_paced(const uint8_t* data, size_t len);
     void write_paced_bytes(const uint8_t* data, size_t len, uint32_t delay_us = 250);
     bool write_line_paged(const std::string& line_str);
 

@@ -152,7 +152,7 @@ bool xmodem_download_and_send(const std::string& url, ISerialIO& io, INetwork& n
         host = host.substr(0, colon);
     }
 
-    io.write("+XMODEM: Connecting to " + host + "...\r\n");
+    io.write_paced("+XMODEM: Connecting to " + host + "...\r\n");
     std::unique_ptr<ISocket> sock;
     if (is_https) {
         sock = net.connect_tls(host, port, host, 10000);
@@ -161,7 +161,7 @@ bool xmodem_download_and_send(const std::string& url, ISerialIO& io, INetwork& n
     }
 
     if (!sock) {
-        io.write("+XMODEM: Connection failed\r\n");
+        io.write_paced("+XMODEM: Connection failed\r\n");
         return false;
     }
 
@@ -195,7 +195,7 @@ bool xmodem_download_and_send(const std::string& url, ISerialIO& io, INetwork& n
     }
     sock->close();
 
-    io.write("+XMODEM: Downloaded " + std::to_string(body.size()) + " bytes. Ready for receiver...\r\n");
+    io.write_paced("+XMODEM: Downloaded " + std::to_string(body.size()) + " bytes. Ready for receiver...\r\n");
     return xmodem_send_stream(body.data(), body.size(), io, delay_us);
 }
 

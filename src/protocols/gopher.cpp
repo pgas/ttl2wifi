@@ -79,7 +79,7 @@ bool gopher_fetch(const std::string& url_raw, ISerialIO& io, INetwork& net, NavH
     uint8_t ch;
     while (true) {
         if (io.check_abort()) {
-            io.write("\r\n^C Aborted\r\n");
+            io.write_paced("\r\n^C Aborted\r\n");
             break;
         }
         int n = sock->recv(&ch, 1, 10000);
