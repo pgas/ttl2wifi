@@ -1,36 +1,52 @@
 #include "pico_net.hpp"
 #include "../../protocols/ntp.hpp"
 #include "pico/cyw43_arch.h"
-#include "lwip/tcp.h"
+#include "lwip/altcp.h"
+#include "lwip/altcp_tcp.h"
+#include "lwip/altcp_tls.h"
 #include "lwip/dns.h"
 #include "lwip/pbuf.h"
+#include "mbedtls/ssl.h"
 #include <cstring>
 #include <vector>
 #include <deque>
 
 namespace ttl2wifi::pico {
 
+static struct altcp_tls_config* g_tls_client_conf = nullptr;
+
 class PicoSocket : public ISocket {
 public:
     PicoSocket() = default;
     ~PicoSocket() override { close(); }
 
-    bool connect(const ip_addr_t* ip, uint16_t port, uint32_t timeout_ms) {
+    bool connect(const ip_addr_t* ip, uint16_t port, struct altcp_tls_config* tls_conf, const std::string& sni, uint32_t timeout_ms) {
         cyw43_arch_lwip_begin();
-        pcb_ = tcp_new_ip_type(IPADDR_TYPE_V4);
+        if (tls_conf) {
+            pcb_ = altcp_tls_new(tls_conf, IPADDR_TYPE_V4);
+            if (pcb_ && !sni.empty()) {
+                mbedtls_ssl_context* ssl = static_cast<mbedtls_ssl_context*>(altcp_tls_context(pcb_));
+                if (ssl) {
+                    mbedtls_ssl_set_hostname(ssl, sni.c_str());
+                }
+            }
+        } else {
+            pcb_ = altcp_new_ip_type(nullptr, IPADDR_TYPE_V4);
+        }
+
         if (!pcb_) {
             cyw43_arch_lwip_end();
             return false;
         }
 
-        tcp_arg(pcb_, this);
-        tcp_recv(pcb_, recv_callback);
-        tcp_err(pcb_, err_callback);
+        altcp_arg(pcb_, this);
+        altcp_recv(pcb_, recv_callback);
+        altcp_err(pcb_, err_callback);
 
         connected_ = false;
         error_ = false;
 
-        err_t err = tcp_connect(pcb_, ip, port, connected_callback);
+        err_t err = altcp_connect(pcb_, ip, port, connected_callback);
         cyw43_arch_lwip_end();
 
         if (err != ERR_OK) {
@@ -56,7 +72,7 @@ public:
         cyw43_arch_lwip_begin();
         size_t sent = 0;
         while (sent < len) {
-            u16_t can_send = tcp_sndbuf(pcb_);
+            u16_t can_send = altcp_sndbuf(pcb_);
             if (can_send == 0) {
                 cyw43_arch_lwip_end();
                 cyw43_arch_poll();
@@ -65,9 +81,9 @@ public:
                 continue;
             }
             u16_t chunk = (len - sent) > can_send ? can_send : static_cast<u16_t>(len - sent);
-            err_t err = tcp_write(pcb_, data + sent, chunk, TCP_WRITE_FLAG_COPY);
+            err_t err = altcp_write(pcb_, data + sent, chunk, TCP_WRITE_FLAG_COPY);
             if (err != ERR_OK) break;
-            tcp_output(pcb_);
+            altcp_output(pcb_);
             sent += chunk;
         }
         cyw43_arch_lwip_end();
@@ -98,10 +114,10 @@ public:
     void close() override {
         cyw43_arch_lwip_begin();
         if (pcb_) {
-            tcp_arg(pcb_, nullptr);
-            tcp_recv(pcb_, nullptr);
-            tcp_err(pcb_, nullptr);
-            tcp_close(pcb_);
+            altcp_arg(pcb_, nullptr);
+            altcp_recv(pcb_, nullptr);
+            altcp_err(pcb_, nullptr);
+            altcp_close(pcb_);
             pcb_ = nullptr;
         }
         cyw43_arch_lwip_end();
@@ -109,13 +125,13 @@ public:
         rx_buf_.clear();
     }
 
-    bool is_connected() const override { return connected_; }
+    bool is_connected() const override { return connected_ && pcb_ != nullptr; }
     bool has_data() override { return !rx_buf_.empty(); }
 
     void on_connected() { connected_ = true; }
     void on_error() { error_ = true; connected_ = false; pcb_ = nullptr; }
 
-    void on_recv(struct pbuf* p) {
+    void on_recv(struct altcp_pcb* pcb, struct pbuf* p) {
         if (!p) {
             // Remote closed connection
             connected_ = false;
@@ -129,20 +145,20 @@ public:
             }
             q = q->next;
         }
-        tcp_recved(pcb_, p->tot_len);
+        altcp_recved(pcb, p->tot_len);
         pbuf_free(p);
     }
 
 private:
-    static err_t connected_callback(void* arg, struct tcp_pcb*, err_t err) {
+    static err_t connected_callback(void* arg, struct altcp_pcb*, err_t err) {
         auto* self = static_cast<PicoSocket*>(arg);
         if (self && err == ERR_OK) self->on_connected();
         return ERR_OK;
     }
 
-    static err_t recv_callback(void* arg, struct tcp_pcb*, struct pbuf* p, err_t) {
+    static err_t recv_callback(void* arg, struct altcp_pcb* pcb, struct pbuf* p, err_t) {
         auto* self = static_cast<PicoSocket*>(arg);
-        if (self) self->on_recv(p);
+        if (self) self->on_recv(pcb, p);
         return ERR_OK;
     }
 
@@ -151,7 +167,7 @@ private:
         if (self) self->on_error();
     }
 
-    struct tcp_pcb* pcb_ = nullptr;
+    struct altcp_pcb* pcb_ = nullptr;
     volatile bool connected_ = false;
     volatile bool error_ = false;
     std::deque<uint8_t> rx_buf_;
@@ -318,15 +334,35 @@ std::unique_ptr<ISocket> PicoNetwork::connect_tcp(const std::string& host, uint1
     ipaddr_aton(ip_str.c_str(), &ip);
 
     auto sock = std::make_unique<PicoSocket>();
-    if (!sock->connect(&ip, port, timeout_ms)) {
+    if (!sock->connect(&ip, port, nullptr, "", timeout_ms)) {
         return nullptr;
     }
     return sock;
 }
 
-std::unique_ptr<ISocket> PicoNetwork::connect_tls(const std::string& host, uint16_t port, const std::string&, uint32_t timeout_ms) {
-    // Fallback to TCP (or altcp_tls with mbedtls)
-    return connect_tcp(host, port, timeout_ms);
+std::unique_ptr<ISocket> PicoNetwork::connect_tls(const std::string& host, uint16_t port, const std::string& sni, uint32_t timeout_ms) {
+    if (!initialized_) return nullptr;
+    std::string ip_str;
+    if (!resolve_dns(host, ip_str)) {
+        return nullptr;
+    }
+
+    ip_addr_t ip;
+    ipaddr_aton(ip_str.c_str(), &ip);
+
+    if (!g_tls_client_conf) {
+        g_tls_client_conf = altcp_tls_create_config_client(nullptr, 0);
+    }
+    if (!g_tls_client_conf) {
+        return nullptr;
+    }
+
+    auto sock = std::make_unique<PicoSocket>();
+    std::string server_sni = sni.empty() ? host : sni;
+    if (!sock->connect(&ip, port, g_tls_client_conf, server_sni, timeout_ms)) {
+        return nullptr;
+    }
+    return sock;
 }
 
 std::string PicoNetwork::get_ntp_time(const std::string& server) {

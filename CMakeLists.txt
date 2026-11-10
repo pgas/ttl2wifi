@@ -17,6 +17,8 @@ if (DEFINED PICO_BOARD OR DEFINED ENV{PICO_BOARD})
 
     pico_sdk_init()
 
+    set(PICO_MBEDTLS_CONFIG_FILE "${CMAKE_CURRENT_LIST_DIR}/src/platform/pico/mbedtls_config.h")
+
     # Shared C++ core & protocols
     add_library(ttl2wifi_core STATIC
         src/core/serial_io.cpp
@@ -33,6 +35,8 @@ if (DEFINED PICO_BOARD OR DEFINED ENV{PICO_BOARD})
         pico_stdlib
         hardware_rtc
         pico_cyw43_arch_lwip_threadsafe_background
+        pico_lwip_mbedtls
+        pico_mbedtls
     )
 
     # Pico W executable
@@ -56,6 +60,8 @@ if (DEFINED PICO_BOARD OR DEFINED ENV{PICO_BOARD})
         hardware_sync
         hardware_rtc
         pico_cyw43_arch_lwip_threadsafe_background
+        pico_lwip_mbedtls
+        pico_mbedtls
     )
 
     pico_add_extra_outputs(ttl2wifi)
@@ -73,6 +79,8 @@ else()
         set(OPENSSL_ROOT_DIR "/opt/homebrew/opt/openssl")
     endif()
     find_package(OpenSSL REQUIRED)
+
+    set(PICO_MBEDTLS_CONFIG_FILE "${CMAKE_CURRENT_LIST_DIR}/src/platform/pico/mbedtls_config.h")
 
     # Shared C++ core & protocols
     add_library(ttl2wifi_core STATIC

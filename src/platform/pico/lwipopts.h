@@ -43,8 +43,8 @@
 #define DHCP_DOES_ARP_CHECK         0
 #define LWIP_DHCP_DOES_ACD_CHECK    0
 
-#define LWIP_ALTCP                  0
-#define LWIP_ALTCP_TLS              0
-#define LWIP_ALTCP_TLS_MBEDTLS      0
+#define LWIP_ALTCP                  1
+#define LWIP_ALTCP_TLS              1
+#define LWIP_ALTCP_TLS_MBEDTLS      1
 
 #endif /* _LWIPOPTS_H */
