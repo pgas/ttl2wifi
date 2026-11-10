@@ -54,8 +54,18 @@ flash: $(FIRMWARE_BIN)
 reset:
 	$(VENV)/python3 scripts/swd_repl.py --reset
 
+pico firmware uf2:
+	@mkdir -p build/pico
+	cmake -B build/pico -DPICO_BOARD=pico_w -S . && cmake --build build/pico
+	@echo "Built turnkey Pico W firmware: build/pico/ttl2wifi.uf2"
+
+clean:
+	rm -rf build/sim build/pico
+
 sim:
-	python3 sim/sim_bridge.py --stdio
+	@mkdir -p build/sim
+	cmake -B build/sim -S . && cmake --build build/sim
+	./build/sim/ttl2wifi_sim --stdio
 
 simh:
 	./sim/run_sim.sh

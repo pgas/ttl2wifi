@@ -14,3 +14,6 @@ firmware/*.hex
 
 # Simulator working files
 build/
+
+# External SDKs / submodules
+external/
