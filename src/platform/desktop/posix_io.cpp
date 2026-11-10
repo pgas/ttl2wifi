@@ -3,8 +3,10 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <string_view>
 #include <thread>
 #include <termios.h>
 
@@ -21,6 +23,14 @@ bool PosixSerialIO::open_socket(const std::string& host, uint16_t port) {
     close();
     int s = ::socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0) return false;
+
+    int nodelay = 1;
+    setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+
+#if defined(SO_NOSIGPIPE)
+    int nosigpipe = 1;
+    setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe));
+#endif
 
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -67,7 +77,22 @@ int PosixSerialIO::hw_read(uint8_t* buf, size_t max_len) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return 0;
         }
+        if (is_socket_) {
+            close();
+        }
         return -1;
+    }
+    if (n == 0 && is_socket_) {
+        // Remote peer disconnected
+        close();
+        return -1;
+    }
+    if (n > 0 && is_socket_) {
+        std::string_view sv(reinterpret_cast<const char*>(buf), static_cast<size_t>(n));
+        if (sv.find("No answer on any connection") != std::string_view::npos) {
+            close();
+            return -1;
+        }
     }
     return static_cast<int>(n);
 }
@@ -83,6 +108,9 @@ void PosixSerialIO::hw_write(const uint8_t* data, size_t len) {
         } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         } else {
+            if (is_socket_) {
+                close();
+            }
             break;
         }
     }

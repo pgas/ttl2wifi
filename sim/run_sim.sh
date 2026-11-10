@@ -65,10 +65,10 @@ fi
 lsof -ti:"$BRIDGE_PORT" | xargs kill -9 2>/dev/null || true
 if [ ! -x "$BUILD_SIM_DIR/ttl2wifi_sim" ]; then
   echo "Building C++ desktop simulator (build/sim/ttl2wifi_sim)..."
-  cmake -B "$BUILD_SIM_DIR" -S "$REPO_ROOT" && cmake --build "$BUILD_SIM_DIR" -j4
+  cmake -B "$BUILD_SIM_DIR" -S "$TTL2WIFI_DIR" && cmake --build "$BUILD_SIM_DIR" -j4
 fi
 echo "Starting TTL2WiFi C++ bridge emulator (client to SimH:$BRIDGE_PORT, log: build/sim/bridge.log)..."
-"$BUILD_SIM_DIR/ttl2wifi_sim" --connect "127.0.0.1:$BRIDGE_PORT" > "$BUILD_SIM_DIR/bridge.log" 2>&1 &
+(trap '' INT; exec "$BUILD_SIM_DIR/ttl2wifi_sim" --connect "127.0.0.1:$BRIDGE_PORT" > "$BUILD_SIM_DIR/bridge.log" 2>&1) &
 BRIDGE_PID=$!
 
 cleanup() {

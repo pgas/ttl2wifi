@@ -50,6 +50,7 @@ static void sig_handler(int) {
 int main(int argc, char** argv) {
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
+    signal(SIGPIPE, SIG_IGN);
 
     std::string connect_target = "127.0.0.1:8823";
     bool use_stdio = false;
@@ -73,6 +74,12 @@ int main(int argc, char** argv) {
             std::cerr << "Failed to open stdio" << std::endl;
             return 1;
         }
+        modem.init();
+        io.write(modem.banner());
+        while (g_running) {
+            modem.tick();
+            std::this_thread::sleep_for(std::chrono::microseconds(500));
+        }
     } else {
         std::string host = "127.0.0.1";
         uint16_t port = 8823;
@@ -84,20 +91,20 @@ int main(int argc, char** argv) {
 
         std::cout << "[Desktop] Connecting to SimH M2SIO bridge at " << host << ":" << port << "..." << std::endl;
         while (g_running) {
-            if (io.open_socket(host, port)) {
-                std::cout << "[Desktop] Connected to " << host << ":" << port << std::endl;
-                break;
+            if (!io.is_open()) {
+                if (io.open_socket(host, port)) {
+                    std::cout << "[Desktop] Connected to " << host << ":" << port << std::endl;
+                    modem.init();
+                    io.write(modem.banner());
+                } else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    continue;
+                }
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+            modem.tick();
+            std::this_thread::sleep_for(std::chrono::microseconds(500));
         }
-    }
-
-    modem.init();
-    io.write(modem.banner());
-
-    while (g_running) {
-        modem.tick();
-        std::this_thread::sleep_for(std::chrono::microseconds(500));
     }
 
     std::cout << "\n[Desktop] Exiting..." << std::endl;

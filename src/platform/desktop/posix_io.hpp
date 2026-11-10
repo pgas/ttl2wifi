@@ -13,6 +13,7 @@ public:
     bool open_socket(const std::string& host, uint16_t port);
     bool open_stdio();
     void close();
+    bool is_open() const { return fd_ >= 0; }
 
     int hw_read(uint8_t* buf, size_t max_len) override;
     void hw_write(const uint8_t* data, size_t len) override;
