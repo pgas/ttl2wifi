@@ -39,7 +39,7 @@ int main() {
     ttl2wifi::pico::PicoFlowUART uart(uart0, 115200);
     ttl2wifi::pico::PicoNetwork net;
 
-    uart.init(3); // Default HW RTS/CTS
+    uart.init(0); // Default None (HW flow control off)
     net.init();
 
     ttl2wifi::pico::PicoModem modem(uart, net);

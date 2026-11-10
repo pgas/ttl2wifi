@@ -14,11 +14,12 @@
 | **`ATE0`** / **`ATE1`** | — | Disable / enable local character echo. |
 | **`AT&W`** | — | Save current settings (SSID, password, echo, flow mode, pager lines) to `config.json`. |
 | **`ATZ`** | — | Reload configuration from `config.json`. |
-| **`AT&F`** | — | Reset to factory defaults (`echo=on`, `flow=3`, `page=0`). |
-| **`AT&K0`** | — | Flow control: **None** (raw 8-bit transparent binary path, ideal for XMODEM). |
-| **`AT&K3`** | — | Flow control: **Hardware RTS/CTS** on `GP2` (`CTS`) and `GP3` (`RTS`) *(Default)*. |
+| **`AT&F`** | — | Reset to factory defaults (`echo=on`, `flow=0`, `page=0`, `char_delay=500us`, `line_delay=20ms`). |
+| **`AT&K0`** | — | Flow control: **None** *(Default)* (ideal for 3-wire serial connections and Z180 ASCI1). |
+| **`AT&K3`** | — | Flow control: **Hardware RTS/CTS** on `GP2` (`CTS`) and `GP3` (`RTS`). |
 | **`AT&K4`** | — | Flow control: **Software XON/XOFF** (`0x11` / `0x13`). |
 | **`AT+PAGE=<n>`** | `<lines>` | Screen pager. Pauses output every `<n>` lines with `-- More --` prompt (`0` = continuous). |
+| **`AT+DELAY=<us>[,<ms>]`** | `<us>[,<ms>]` | Pacing delay for slow vintage UARTs. Default: `500,20` (500 µs/char, 20 ms/newline). `0,0` disables delay. Query with `AT+DELAY?`. |
 | **`AT+WSCAN`** | — | Scan nearby 2.4 GHz Wi-Fi access points and display SSID, RSSI, channel, and security. |
 | **`AT+WJOIN="ssid","pass"`** | `"ssid"[,"pass"]` | Connect to a Wi-Fi network. Follow with `AT&W` to auto-connect on boot. |
 | **`AT+WSTAT`** | — | Show Wi-Fi status: connection state, IP, subnet mask, gateway, DNS, MAC, and RSSI. |

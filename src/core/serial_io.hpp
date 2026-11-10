@@ -31,6 +31,14 @@ public:
     bool is_aborted() const { return aborted_; }
     void set_aborted(bool val) { aborted_ = val; }
 
+    // Pacing delays for retro hosts
+    void set_delays(uint32_t char_delay_us, uint32_t line_delay_ms) {
+        char_delay_us_ = char_delay_us;
+        line_delay_ms_ = line_delay_ms;
+    }
+    uint32_t char_delay_us() const { return char_delay_us_; }
+    uint32_t line_delay_ms() const { return line_delay_ms_; }
+
     // Character / text output
     void write(const std::string& str);
     void write(const uint8_t* data, size_t len);
@@ -57,6 +65,8 @@ protected:
     int page_lines_ = 0;
     int cur_line_ = 0;
     bool aborted_ = false;
+    uint32_t char_delay_us_ = 500;
+    uint32_t line_delay_ms_ = 20;
     std::deque<uint8_t> rx_queue_;
 };
 

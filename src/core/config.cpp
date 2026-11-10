@@ -7,9 +7,11 @@ void ModemConfig::reset_defaults() {
     wifi_ssid.clear();
     wifi_password.clear();
     echo = true;
-    flow_mode = 3;
+    flow_mode = 0;
     page_lines = 0;
     baud = 115200;
+    char_delay_us = 500;
+    line_delay_ms = 20;
 }
 
 static std::string escape_json(const std::string& s) {
@@ -33,7 +35,9 @@ std::string ModemConfig::to_json() const {
        << "  \"echo\": " << (echo ? "true" : "false") << ",\n"
        << "  \"flow_mode\": " << flow_mode << ",\n"
        << "  \"page_lines\": " << page_lines << ",\n"
-       << "  \"baud\": " << baud << "\n"
+       << "  \"baud\": " << baud << ",\n"
+       << "  \"char_delay_us\": " << char_delay_us << ",\n"
+       << "  \"line_delay_ms\": " << line_delay_ms << "\n"
        << "}\n";
     return ss.str();
 }
@@ -87,9 +91,11 @@ bool ModemConfig::from_json(const std::string& json_str) {
     wifi_ssid = extract_string_value(json_str, "wifi_ssid");
     wifi_password = extract_string_value(json_str, "wifi_password");
     echo = extract_bool_value(json_str, "echo", true);
-    flow_mode = static_cast<int>(extract_int_value(json_str, "flow_mode", 3));
+    flow_mode = static_cast<int>(extract_int_value(json_str, "flow_mode", 0));
     page_lines = static_cast<int>(extract_int_value(json_str, "page_lines", 0));
     baud = static_cast<uint32_t>(extract_int_value(json_str, "baud", 115200));
+    char_delay_us = static_cast<uint32_t>(extract_int_value(json_str, "char_delay_us", 500));
+    line_delay_ms = static_cast<uint32_t>(extract_int_value(json_str, "line_delay_ms", 20));
     return true;
 }
 

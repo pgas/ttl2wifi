@@ -15,8 +15,9 @@ static const char* HELP_TEXT =
     "  ATI                - Modem info, MAC, IP & settings\r\n"
     "  AT? / AT+HELP      - Show this command summary\r\n"
     "  ATE0 / ATE1        - Command echo Off / On\r\n"
-    "  AT&K0 / &K3 / &K4  - Flow control: None / HW RTS-CTS / SW XON-XOFF\r\n"
+    "  AT&K0 / &K3 / &K4  - Flow control: None (default) / HW RTS-CTS / SW XON-XOFF\r\n"
     "  AT+PAGE=<lines>    - Screen pager (e.g. AT+PAGE=22, or 0=off)\r\n"
+    "  AT+DELAY=<us>[,<ms>] - Pacing delay (e.g. 500,20; 0,0=off)\r\n"
     "  AT&W / ATZ / AT&F  - Save / Reload / Factory-reset config\r\n"
     "  ATDT<host>:<port>  - Dial raw TCP stream (+++ to escape)\r\n"
     "  ATDS<host>:<port>  - Dial TLS stream (+++ to escape)\r\n"
@@ -91,6 +92,7 @@ AtModem::AtModem(ISerialIO& io, INetwork& net)
 void AtModem::init() {
     load_config();
     io_.set_page_lines(config_.page_lines);
+    io_.set_delays(config_.char_delay_us, config_.line_delay_ms);
     apply_flow_mode(config_.flow_mode);
     mode_ = ModemMode::COMMAND;
     cmd_buf_.clear();
@@ -117,6 +119,8 @@ void AtModem::reply(const std::string& text) {
 void AtModem::write_info() {
     io_.write_line_paged("TTL2WiFi v" + std::string(VERSION) + " (C++ Native)");
     io_.write_line_paged("Flow Control: " + flow_desc());
+    io_.write_line_paged("Pacing: " + std::to_string(config_.char_delay_us) + " us/char, " +
+                         std::to_string(config_.line_delay_ms) + " ms/newline");
     io_.write_line_paged("Pager: " + (config_.page_lines > 0 ? (std::to_string(config_.page_lines) + " lines") : "Off"));
     io_.write_line_paged("Local Echo: " + std::string(config_.echo ? "On (E1)" : "Off (E0)"));
 
@@ -316,17 +320,42 @@ void AtModem::handle_command(const std::string& line) {
         } else {
             reply("ERROR");
         }
+    } else if (body_up == "+DELAY?" || body_up == "+PACE?") {
+        io_.write_paced("+DELAY: " + std::to_string(config_.char_delay_us) + " us/char, " +
+                         std::to_string(config_.line_delay_ms) + " ms/newline\r\n");
+        reply("OK");
+    } else if (body_up.rfind("+DELAY=", 0) == 0 || body_up.rfind("+PACE=", 0) == 0) {
+        size_t eq = body.find('=');
+        std::string val_str = body.substr(eq + 1);
+        char* endp = nullptr;
+        long char_us = std::strtol(val_str.c_str(), &endp, 10);
+        if (endp != val_str.c_str()) {
+            config_.char_delay_us = static_cast<uint32_t>(std::max(0L, char_us));
+            if (*endp == ',' || *endp == ' ') {
+                char* endp2 = nullptr;
+                long line_ms = std::strtol(endp + 1, &endp2, 10);
+                if (endp2 != endp + 1) {
+                    config_.line_delay_ms = static_cast<uint32_t>(std::max(0L, line_ms));
+                }
+            }
+            io_.set_delays(config_.char_delay_us, config_.line_delay_ms);
+            reply("OK");
+        } else {
+            reply("ERROR: Usage AT+DELAY=<us>[,<ms>]");
+        }
     } else if (body_up == "&W") {
         save_config();
         reply("OK");
     } else if (body_up == "Z") {
         load_config();
         io_.set_page_lines(config_.page_lines);
+        io_.set_delays(config_.char_delay_us, config_.line_delay_ms);
         apply_flow_mode(config_.flow_mode);
         reply("OK");
     } else if (body_up == "&F") {
         config_.reset_defaults();
         io_.set_page_lines(config_.page_lines);
+        io_.set_delays(config_.char_delay_us, config_.line_delay_ms);
         apply_flow_mode(config_.flow_mode);
         reply("OK");
     } else if (body_up == "O") {
