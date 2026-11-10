@@ -1,71 +1,55 @@
-# MicroPython on Raspberry Pi Pico W via 3-pin SWD Debug Probe (CMSIS-DAP)
+# TTL2WiFi - Raspberry Pi Pico W C++ AT Modem & Retro Protocol Bridge
 
-VENV := .venv/bin
 OPENOCD := openocd -f interface/cmsis-dap.cfg -f target/rp2040.cfg -c "adapter speed 5000"
-FIRMWARE_UF2 := firmware/RPI_PICO_W-v1.24.1.uf2
-FIRMWARE_BIN := firmware/RPI_PICO_W-v1.24.1.bin
+PICO_ELF := build/pico/ttl2wifi.elf
+PICO_UF2 := build/pico/ttl2wifi.uf2
+SIM_BIN  := build/sim/ttl2wifi_sim
 
-.PHONY: help ttl repl run sync deploy reset flash probe image uf2 sim simh
+.PHONY: help pico uf2 image firmware sim simh flash reset probe clean ttl
 
 help:
-	@echo "Standalone Drag-and-Drop UF2 Image (BOOTSEL mode - no SWD needed):"
-	@echo "  make image    - Build turnkey firmware/ttl2wifi.uf2 (drag to RPI-RP2 drive)"
+	@echo "TTL2WiFi C++ Build & Flash Commands"
+	@echo "==================================="
+	@echo "Firmware (Raspberry Pi Pico W):"
+	@echo "  make pico / make uf2 - Build turnkey build/pico/ttl2wifi.uf2"
+	@echo "  make flash           - Flash build/pico/ttl2wifi.elf over SWD probe"
+	@echo "  make reset           - Hardware reset target over SWD probe"
+	@echo "  make probe           - Test CMSIS-DAP SWD connection to Pico W"
 	@echo ""
-	@echo "TTL Serial Client (SC131 / USB-to-TTL Adapter):"
-	@echo "  make ttl      - Open serial terminal on /dev/cu.usbmodem08481 (115200 8N1)"
+	@echo "Host Simulator (macOS / Linux):"
+	@echo "  make sim             - Build & run native AT bridge emulator (stdio)"
+	@echo "  make simh            - Run RomWBW in SimH connected to C++ bridge"
 	@echo ""
-	@echo "MicroPython SWD Commands (3-pin Debug Probe):"
-	@echo "  make repl     - Open interactive MicroPython REPL over SWD (Ctrl-] to exit)"
-	@echo "  make run      - Run src/main.py immediately on the target Pico W over SWD (<1s)"
-	@echo "  make sync     - Upload src/main.py to :main.py on the Pico W over SWD (<1s)"
-	@echo "  make deploy   - Full LittleFS rebuild & flash of src/*.py over SWD"
-	@echo "  make reset    - Hard-reset the target Pico W over SWD"
-	@echo "  make flash    - Re-flash MicroPython v1.24.1 (RPI_PICO_W) firmware over SWD"
-	@echo "  make probe    - Test SWD connection to target Pico W"
-	@echo ""
-	@echo "Host Simulator (no hardware, see sim/README.md):"
-	@echo "  make sim      - Run the AT bridge emulator interactively (stdio)"
-	@echo "  make simh     - Run RomWBW in SimH with the bridge emulator on CIO unit 1"
+	@echo "Utilities:"
+	@echo "  make ttl             - Open serial terminal on /dev/cu.usbmodem08481 (115200 8N1)"
+	@echo "  make clean           - Remove build directories"
 
-ttl:
-	$(VENV)/python3 -m serial.tools.miniterm /dev/cu.usbmodem08481 115200
-
-repl:
-	$(VENV)/python3 scripts/swd_repl.py
-
-run:
-	$(VENV)/python3 scripts/swd_repl.py --run src/main.py
-
-sync:
-	$(VENV)/python3 scripts/swd_repl.py --sync src
-
-deploy deploy-swd:
-	$(VENV)/python3 scripts/deploy_swd.py
-
-image uf2:
-	$(VENV)/python3 scripts/build_uf2.py
-
-probe:
-	$(OPENOCD) -c "init; targets; exit"
-
-flash: $(FIRMWARE_BIN)
-	$(OPENOCD) -c "program $(FIRMWARE_BIN) 0x10000000 verify reset exit"
-
-reset:
-	$(VENV)/python3 scripts/swd_repl.py --reset
-
-pico firmware uf2:
+pico uf2 image firmware:
 	@mkdir -p build/pico
 	cmake -B build/pico -DPICO_BOARD=pico_w -S . && cmake --build build/pico
-	@echo "Built turnkey Pico W firmware: build/pico/ttl2wifi.uf2"
-
-clean:
-	rm -rf build/sim build/pico
+	@echo "\n==> Turnkey firmware ready: $(PICO_UF2)\n"
 
 sim:
 	@mkdir -p build/sim
 	cmake -B build/sim -S . && cmake --build build/sim
-	./build/sim/ttl2wifi_sim --stdio
+	./$(SIM_BIN) --stdio
 
 simh:
 	./sim/run_sim.sh
+
+$(PICO_ELF): pico
+
+flash: $(PICO_ELF)
+	$(OPENOCD) -c "program $(PICO_ELF) verify reset exit"
+
+reset:
+	$(OPENOCD) -c "init; reset run; exit"
+
+probe:
+	$(OPENOCD) -c "init; targets; exit"
+
+ttl:
+	python3 -m serial.tools.miniterm /dev/cu.usbmodem08481 115200
+
+clean:
+	rm -rf build/sim build/pico

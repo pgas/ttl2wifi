@@ -21,3 +21,4 @@ struct NtpDateTime {
 std::string ntp_sync_host(const std::string& host = "pool.ntp.org", NtpDateTime* dt_out = nullptr);
 
 } // namespace ttl2wifi::protocols
+
