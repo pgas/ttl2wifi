@@ -61,27 +61,25 @@ AT+XMODEM="http://192.168.1.100:8000/MYFILE.COM"
 
 ## Source Layout
 
-| File | Role |
+| Directory / File | Role |
 |---|---|
-| `src/main.py` | Pico W layer: `FlowUART` (UART0, RTS/CTS, XON/XOFF, pacing) and Wi-Fi hooks |
-| `src/modem.py` | Platform-neutral Hayes AT command processor |
-| `src/serialio.py` | Serial I/O base class (pager, Ctrl-C abort, hidden input) |
-| `src/net.py` | Shared socket/TLS/URL helpers, `BrowserState`, MicroPython/CPython shims |
-| `src/gemini.py`, `gopher.py`, `httpget.py`, `xmodem.py`, `ssh.py`, `ntp.py` | Protocol clients |
+| `src/core/` | Platform-neutral C++ core: `ISerialIO`, `AtModem`, `INetwork`, `ModemConfig` |
+| `src/protocols/` | Protocol engines: Gopher, Gemini, HTTP, XMODEM, SNTP |
+| `src/platform/pico/` | Pico W hardware: `PicoFlowUART` (HW RTS/CTS), `PicoNetwork` (CYW43 + lwIP), Flash |
+| `src/platform/desktop/` | Native simulator: `PosixSerialIO`, `PosixNetwork` (BSD Sockets + OpenSSL) |
 
 ## Host Simulator
 
-[`sim/`](sim/README.md) runs the same `src/` code under CPython (`make sim`), and can boot RomWBW in
-SimH with the emulated bridge on a serial port (`make simh`, needs the included RomWBW patch).
+[`sim/`](sim/README.md) runs the native C++ desktop target (`make sim`), and boots RomWBW in
+SimH with the emulated bridge on a serial port (`make simh`, using the included RomWBW patch).
 
 ---
 
 ## Documentation
 
-Full documentation is available in the [`docs/`](docs/) directory:
+Full documentation is available in the [`doc/`](doc/) directory:
 
-* [**AT Command Reference (`docs/commands.md`)**](docs/commands.md) — Complete command list, syntax, and protocol guides.
-* [**Hardware & SC131 Wiring (`docs/hardware.md`)**](docs/hardware.md) — 5V TTL schematic, resistor dividers, and pinouts.
-* [**XMODEM File Transfers (`docs/xmodem.md`)**](docs/xmodem.md) — Downloading files into CP/M using `HTALK` and `XM R1`.
-* [**SWDTerm Architecture (`docs/swdterm.md`)**](docs/swdterm.md) — Zero-UART REPL and syncing over the 3-pin SWD probe.
-* [**Roadmap & Specs (`docs/roadmap.md`)**](docs/roadmap.md) — Project design and implementation roadmap.
+* [**AT Command Reference (`doc/commands.md`)**](doc/commands.md) — Complete command list, syntax, and protocol guides.
+* [**Hardware & SC131 Wiring (`doc/hardware.md`)**](doc/hardware.md) — 5V TTL schematic, resistor dividers, and pinouts.
+* [**XMODEM File Transfers (`doc/xmodem.md`)**](doc/xmodem.md) — Downloading files into CP/M using `HTALK` and `XM R1`.
+* [**Roadmap & Specs (`doc/roadmap.md`)**](doc/roadmap.md) — Project design and implementation roadmap.

@@ -2,20 +2,18 @@
 
 | File | Purpose |
 |---|---|
-| `sim_bridge.py` | Runs the firmware's AT modem (`../src/modem.py` + protocol modules) on the host |
-| `run_sim.sh` | Starts SimH AltairZ80 with RomWBW, with the emulator wired to HBIOS CIO unit 1 |
+| `run_sim.sh` | Starts SimH AltairZ80 with RomWBW, with `ttl2wifi_sim` wired to HBIOS CIO unit 1 |
 | `simh.cfg` | SimH config: console on SIO, bridge on M2SIO0 (6850 ACIA @ 0x10) |
 | `romwbw-simh-acia.patch` | RomWBW changes needed for the ACIA bridge port under SimH |
 
 ## Bridge emulator only
 
 ```sh
-./sim_bridge.py --stdio          # type AT commands directly
-./sim_bridge.py --tcp 9999       # listen; then: nc 127.0.0.1 9999
-./sim_bridge.py --pty            # creates /dev/ttys* for minicom etc.
+make sim                         # type AT commands directly in stdio mode
+./build/sim/ttl2wifi_sim --connect 127.0.0.1:8823  # connect to SimH listener
 ```
 
-Everything works like the Pico W firmware except `AT+SSH` (needs MicroPython's `cryptolib`); Wi-Fi commands are simulated.
+Everything works identically to the Pico W firmware (TCP/TLS dialing, Gopher, Gemini, HTTP, XMODEM, NTP). Wi-Fi scan and status are simulated on the host.
 
 ## RomWBW in SimH
 
