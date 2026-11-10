@@ -12,7 +12,15 @@ void ISerialIO::write(const uint8_t* data, size_t len) {
 }
 
 void ISerialIO::write_paced(const std::string& str) {
-    write(str);
+    for (char c : str) {
+        uint8_t b = static_cast<uint8_t>(c);
+        hw_write(&b, 1);
+        if (b == 0x0A) {
+            sleep_us(10000); // 10ms delay on newline for vintage terminal scrolling
+        } else {
+            sleep_us(250);   // 250us inter-byte delay (~3000 cps)
+        }
+    }
 }
 
 void ISerialIO::write_paced_bytes(const uint8_t* data, size_t len, uint32_t delay_us) {

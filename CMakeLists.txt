@@ -43,6 +43,9 @@ if (DEFINED PICO_BOARD OR DEFINED ENV{PICO_BOARD})
         src/platform/pico/pico_flash.cpp
     )
 
+    pico_enable_stdio_uart(ttl2wifi 0)
+    pico_enable_stdio_usb(ttl2wifi 0)
+
     target_include_directories(ttl2wifi PUBLIC src/platform/pico)
     target_link_libraries(ttl2wifi PRIVATE
         ttl2wifi_core

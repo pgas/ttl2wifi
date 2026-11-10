@@ -39,6 +39,7 @@ void PicoFlowUART::set_flow_mode(int mode) {
         // HW RTS/CTS
         gpio_set_function(UART_CTS_PIN, GPIO_FUNC_UART);
         gpio_set_function(UART_RTS_PIN, GPIO_FUNC_UART);
+        gpio_pull_down(UART_CTS_PIN); // Active-low CTS: default asserted if floating
         uart_set_hw_flow(uart_, true, true);
     } else {
         uart_set_hw_flow(uart_, false, false);

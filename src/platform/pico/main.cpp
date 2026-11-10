@@ -36,8 +36,6 @@ private:
 } // namespace ttl2wifi::pico
 
 int main() {
-    stdio_init_all();
-
     ttl2wifi::pico::PicoFlowUART uart(uart0, 115200);
     ttl2wifi::pico::PicoNetwork net;
 
