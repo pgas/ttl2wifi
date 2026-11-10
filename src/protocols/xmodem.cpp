@@ -57,6 +57,10 @@ bool xmodem_send_stream(const uint8_t* data, size_t len, ISerialIO& io, uint32_t
         }
     }
 
+    // Small pause and flush any duplicate handshake bytes
+    io.sleep_us(50000);
+    io.flush_rx();
+
     // 2. Transmit 128-byte packets
     uint8_t packet_num = 1;
     size_t offset = 0;
@@ -115,6 +119,8 @@ bool xmodem_send_stream(const uint8_t* data, size_t len, ISerialIO& io, uint32_t
         io.write_paced_bytes(&eot, 1, delay_us);
         int resp = io.read_raw_byte(3000);
         if (resp == X_ACK) {
+            io.sleep_us(300000);
+            io.write_paced("\r\n+XMODEM: Transfer complete\r\n");
             return true;
         }
     }
@@ -195,7 +201,8 @@ bool xmodem_download_and_send(const std::string& url, ISerialIO& io, INetwork& n
     }
     sock->close();
 
-    io.write_paced("+XMODEM: Downloaded " + std::to_string(body.size()) + " bytes. Ready for receiver...\r\n");
+    io.write_paced("+XMODEM: Downloaded " + std::to_string(body.size()) +
+                   " bytes. Start receiver now (waiting up to 60s for NAK/'C')...\r\n");
     return xmodem_send_stream(body.data(), body.size(), io, delay_us);
 }
 

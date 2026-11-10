@@ -502,15 +502,13 @@ void AtModem::handle_command(const std::string& line) {
     } else if (body_up.rfind("+XMODEM=", 0) == 0) {
         auto args = parse_quoted_args(body.substr(8));
         if (!args.empty()) {
-            uint32_t delay_us = 250;
+            uint32_t delay_us = config_.char_delay_us > 0 ? config_.char_delay_us : 500;
             if (args.size() > 1) {
                 char* endp = nullptr;
                 unsigned long d = std::strtoul(args[1].c_str(), &endp, 10);
                 if (endp != args[1].c_str()) delay_us = static_cast<uint32_t>(d);
             }
-            if (protocols::xmodem_download_and_send(args[0], io_, net_, delay_us)) {
-                reply("OK");
-            } else {
+            if (!protocols::xmodem_download_and_send(args[0], io_, net_, delay_us)) {
                 reply("ERROR: XMODEM transfer failed");
             }
         } else {

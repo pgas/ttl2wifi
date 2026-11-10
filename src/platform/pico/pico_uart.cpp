@@ -77,6 +77,7 @@ void PicoFlowUART::hw_write(const uint8_t* data, size_t len) {
     for (size_t i = 0; i < len; ++i) {
         uart_putc_raw(uart_, data[i]);
     }
+    uart_tx_wait_blocking(uart_);
 }
 
 void PicoFlowUART::sleep_us(uint32_t us) {
