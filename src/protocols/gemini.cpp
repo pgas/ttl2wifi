@@ -52,6 +52,9 @@ bool gemini_fetch(const std::string& initial_url, ISerialIO& io, INetwork& net, 
     if (current_url.find("gemini://") != 0) {
         current_url = "gemini://" + current_url;
     }
+    if (current_url.substr(9).find('/') == std::string::npos) {
+        current_url += "/";
+    }
 
     for (int redir = 0; redir <= max_redirects; ++redir) {
         std::string host;
@@ -89,6 +92,9 @@ bool gemini_fetch(const std::string& initial_url, ISerialIO& io, INetwork& net, 
         int status = std::atoi(header_line.substr(0, 2).c_str());
         std::string meta = header_line.size() > 3 ? header_line.substr(3) : "";
 
+        // Notify client of Gemini header
+        io.write_paced("+GEMINI: " + header_line + "\r\n");
+
         // 1x: INPUT
         if (status >= 10 && status <= 19) {
             sock->close();
@@ -104,6 +110,10 @@ bool gemini_fetch(const std::string& initial_url, ISerialIO& io, INetwork& net, 
         if (status >= 30 && status <= 39) {
             sock->close();
             current_url = resolve_relative_url(current_url, meta);
+            if (current_url.substr(9).find('/') == std::string::npos) {
+                current_url += "/";
+            }
+            io.write_paced("+REDIRECT: " + current_url + "\r\n");
             continue;
         }
 
@@ -117,6 +127,7 @@ bool gemini_fetch(const std::string& initial_url, ISerialIO& io, INetwork& net, 
         // 2x: SUCCESS
         nav.set_page(current_url, push_history);
 
+        bool is_gemtext = meta.empty() || meta.find("text/gemini") != std::string::npos;
         bool in_pre = false;
         std::string line_buf;
 
@@ -134,14 +145,14 @@ bool gemini_fetch(const std::string& initial_url, ISerialIO& io, INetwork& net, 
             }
 
             // Render line
-            if (line_buf.rfind("```", 0) == 0) {
+            if (is_gemtext && line_buf.rfind("```", 0) == 0) {
                 in_pre = !in_pre;
                 if (!line_buf.substr(3).empty()) {
                     io.write_line_paged("--- " + line_buf.substr(3) + " ---");
                 }
             } else if (in_pre) {
                 if (!io.write_line_paged(line_buf)) break;
-            } else if (line_buf.rfind("=>", 0) == 0) {
+            } else if (is_gemtext && line_buf.rfind("=>", 0) == 0) {
                 // Link
                 std::string link_body = line_buf.substr(2);
                 while (!link_body.empty() && (link_body[0] == ' ' || link_body[0] == '\t')) {
@@ -162,11 +173,18 @@ bool gemini_fetch(const std::string& initial_url, ISerialIO& io, INetwork& net, 
                 }
 
                 std::string resolved = resolve_relative_url(current_url, link_target);
-                size_t idx = nav.add_link(resolved, link_label, "GMI");
+                size_t idx = nav.add_link(resolved, link_label, "gemini");
 
-                char prefix[32];
-                snprintf(prefix, sizeof(prefix), "[%2zu:GMI] ", idx);
-                if (!io.write_line_paged(std::string(prefix) + link_label)) break;
+                char prefix[16];
+                snprintf(prefix, sizeof(prefix), "[%2zu] ", idx);
+
+                std::string line_out;
+                if (!link_label.empty() && link_label != link_target) {
+                    line_out = std::string(prefix) + link_label + " (" + link_target + ")";
+                } else {
+                    line_out = std::string(prefix) + link_target;
+                }
+                if (!io.write_line_paged(line_out)) break;
             } else {
                 if (!io.write_line_paged(line_buf)) break;
             }
