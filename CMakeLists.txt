@@ -24,9 +24,6 @@ if (DEFINED PICO_BOARD OR DEFINED ENV{PICO_BOARD})
         src/core/serial_io.cpp
         src/core/config.cpp
         src/core/modem.cpp
-        src/protocols/gopher.cpp
-        src/protocols/gemini.cpp
-        src/protocols/http.cpp
         src/protocols/xmodem.cpp
         src/protocols/ntp.cpp
     )
@@ -87,9 +84,6 @@ else()
         src/core/serial_io.cpp
         src/core/config.cpp
         src/core/modem.cpp
-        src/protocols/gopher.cpp
-        src/protocols/gemini.cpp
-        src/protocols/http.cpp
         src/protocols/xmodem.cpp
         src/protocols/ntp.cpp
     )

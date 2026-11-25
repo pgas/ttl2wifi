@@ -25,9 +25,11 @@ public:
     virtual uint32_t ticks_ms() = 0;
 
     // Pager & Flow control settings
+    void set_flow_mode(int mode) { flow_mode_ = mode; paused_ = false; }
+    int flow_mode() const { return flow_mode_; }
     void set_page_lines(int lines) { page_lines_ = lines; }
     int page_lines() const { return page_lines_; }
-    void reset_pager() { cur_line_ = 0; aborted_ = false; }
+    void reset_pager() { cur_line_ = 0; aborted_ = false; paused_ = false; }
     bool is_aborted() const { return aborted_; }
     void set_aborted(bool val) { aborted_ = val; }
 
@@ -62,6 +64,8 @@ public:
 protected:
     void drain_hw_rx(bool intercept_ctrl_c = false);
 
+    int flow_mode_ = 0;
+    bool paused_ = false;
     int page_lines_ = 0;
     int cur_line_ = 0;
     bool aborted_ = false;

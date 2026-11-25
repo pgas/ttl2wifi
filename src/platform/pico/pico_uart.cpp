@@ -34,6 +34,7 @@ void PicoFlowUART::init(int flow_mode) {
 }
 
 void PicoFlowUART::set_flow_mode(int mode) {
+    ISerialIO::set_flow_mode(mode);
     flow_mode_ = mode;
     if (flow_mode_ == 3) {
         // HW RTS/CTS

@@ -26,8 +26,24 @@ public:
     int send(const uint8_t* data, size_t len) override {
         if (!is_connected()) return -1;
         if (ssl_) {
-            int ret = SSL_write(ssl_, data, static_cast<int>(len));
-            return ret > 0 ? ret : -1;
+            size_t sent = 0;
+            while (sent < len) {
+                int ret = SSL_write(ssl_, data + sent, static_cast<int>(len - sent));
+                if (ret > 0) {
+                    sent += static_cast<size_t>(ret);
+                } else {
+                    int err = SSL_get_error(ssl_, ret);
+                    if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+                        struct pollfd pfd{};
+                        pfd.fd = fd_;
+                        pfd.events = (err == SSL_ERROR_WANT_READ) ? POLLIN : POLLOUT;
+                        ::poll(&pfd, 1, 1000);
+                        continue;
+                    }
+                    return -1;
+                }
+            }
+            return static_cast<int>(sent);
         } else {
             ssize_t ret = ::send(fd_, data, len, 0);
             return ret >= 0 ? static_cast<int>(ret) : -1;
@@ -208,35 +224,7 @@ std::unique_ptr<ISocket> PosixNetwork::connect_tcp(const std::string& host, uint
     return std::make_unique<PosixTcpSocket>(s);
 }
 
-std::unique_ptr<ISocket> PosixNetwork::connect_tls(const std::string& host, uint16_t port, const std::string& sni, uint32_t timeout_ms) {
-    auto tcp_sock = connect_tcp(host, port, timeout_ms);
-    if (!tcp_sock) return nullptr;
-
-    SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
-    if (!ctx) return nullptr;
-
-    SSL* ssl = SSL_new(ctx);
-    if (!ssl) {
-        SSL_CTX_free(ctx);
-        return nullptr;
-    }
-
-    if (!sni.empty()) {
-        SSL_set_tlsext_host_name(ssl, sni.c_str());
-    }
-
-    // Wrap raw socket fd into PosixTcpSocket
-    // To do that, we extract fd
-    auto* raw_posix = static_cast<PosixTcpSocket*>(tcp_sock.release());
-    // PosixTcpSocket private fd, or we pass ownership
-    // Instead of leaking, let's reopen or pass fd
-    int fd = -1;
-    // Let's connect directly:
-    SSL_CTX_free(ctx);
-    SSL_free(ssl);
-    delete raw_posix;
-
-    // Directly create TLS socket
+std::unique_ptr<ISocket> PosixNetwork::connect_tls(const std::string& host, uint16_t port, const std::string& sni, uint32_t) {
     struct addrinfo hints{}, *res = nullptr;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
@@ -257,10 +245,22 @@ std::unique_ptr<ISocket> PosixNetwork::connect_tls(const std::string& host, uint
     }
     freeaddrinfo(res);
 
-    ctx = SSL_CTX_new(TLS_client_method());
-    ssl = SSL_new(ctx);
+    SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
+    if (!ctx) {
+        ::close(s);
+        return nullptr;
+    }
+    SSL* ssl = SSL_new(ctx);
+    if (!ssl) {
+        SSL_CTX_free(ctx);
+        ::close(s);
+        return nullptr;
+    }
     if (!sni.empty()) {
-        SSL_set_tlsext_host_name(ssl, sni.c_str());
+        struct in_addr dummy_addr{};
+        if (inet_pton(AF_INET, sni.c_str(), &dummy_addr) != 1) {
+            SSL_set_tlsext_host_name(ssl, sni.c_str());
+        }
     }
     SSL_set_fd(ssl, s);
     if (SSL_connect(ssl) <= 0) {
@@ -269,6 +269,9 @@ std::unique_ptr<ISocket> PosixNetwork::connect_tls(const std::string& host, uint
         ::close(s);
         return nullptr;
     }
+
+    int flags = fcntl(s, F_GETFL, 0);
+    fcntl(s, F_SETFL, flags | O_NONBLOCK);
 
     return std::make_unique<PosixTcpSocket>(s, ssl, ctx);
 }

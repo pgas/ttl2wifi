@@ -1,7 +1,4 @@
 #include "modem.hpp"
-#include "../protocols/gopher.hpp"
-#include "../protocols/gemini.hpp"
-#include "../protocols/http.hpp"
 #include "../protocols/xmodem.hpp"
 #include <algorithm>
 #include <cctype>
@@ -28,12 +25,8 @@ static const char* HELP_TEXT =
     "  AT+WLEAVE / +WSTAT - Disconnect / Show Wi-Fi & IP status\r\n"
     "  AT+WDNS=\"host\"     - DNS lookup\r\n"
     "  AT+TIME            - Sync RTC via NTP & print UTC time\r\n"
-    "Protocols, Browsing & File Transfer:\r\n"
-    "  AT+GOPHER=\"url\"    - Fetch Gopher menu/file (numbers links [1]..[N])\r\n"
-    "  AT+GEMINI=\"url\"    - Fetch Gemini page over TLS (numbers links [1]..[N])\r\n"
-    "  AT+GO=<n>[,\"qry\"]  - Follow numbered link [n] (or AT+BACK / AT+LINKS)\r\n"
-    "  AT+HTTPGET=\"url\"   - Fetch HTTP/HTTPS URL\r\n"
-    "  AT+XMODEM=\"url\"    - Download URL via 128B XMODEM (CRC/Checksum)\r\n";
+    "File Transfer:\r\n"
+    "  AT+XMODEM=\"url\"    - Download HTTP/HTTPS URL via 128B XMODEM (CRC/Checksum)\r\n";
 
 static std::string to_upper(const std::string& s) {
     std::string out = s;
@@ -94,6 +87,7 @@ void AtModem::init() {
     io_.set_page_lines(config_.page_lines);
     io_.set_delays(config_.char_delay_us, config_.line_delay_ms);
     apply_flow_mode(config_.flow_mode);
+    io_.set_flow_mode(config_.flow_mode);
     mode_ = ModemMode::COMMAND;
     cmd_buf_.clear();
 }
@@ -162,6 +156,7 @@ void AtModem::dial_stream(const std::string& target, bool use_tls) {
     }
 
     peer_desc_ = (use_tls ? "TLS " : "") + host + ":" + std::to_string(port);
+    io_.flush_rx();
     mode_ = ModemMode::ONLINE;
     plus_count_ = 0;
     last_rx_ms_ = io_.ticks_ms();
@@ -176,34 +171,17 @@ void AtModem::close_socket() {
     mode_ = ModemMode::COMMAND;
 }
 
-void AtModem::follow_url(const std::string& url, const std::string& query, bool push_history) {
-    if (url.rfind("gemini://", 0) == 0) {
-        std::string full_url = url;
-        if (!query.empty()) full_url += "?" + query;
-        protocols::gemini_fetch(full_url, io_, net_, nav_, push_history);
-    } else if (url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0) {
-        protocols::http_fetch(url, io_, net_);
-    } else if (url.rfind("telnet://", 0) == 0) {
-        std::string target = url.substr(9);
-        std::string host;
-        uint16_t port = 23;
-        parse_host_port(target, 23, host, port);
-        io_.write_paced("+TELNET: Use ZTELNET or ATDT for " + host + ":" + std::to_string(port) + "\r\n");
-    } else {
-        protocols::gopher_fetch(url, io_, net_, nav_, query, push_history);
-    }
-    reply("OK");
-}
-
 void AtModem::tick() {
     if (mode_ == ModemMode::COMMAND) {
-        int b = io_.read_raw_byte(5);
+        int b = io_.read_raw_byte(0);
         if (b < 0) return;
 
         if (b == '\r' || b == '\n') {
-            if (config_.echo) io_.write("\r\n");
-            handle_command(cmd_buf_);
-            cmd_buf_.clear();
+            if (!cmd_buf_.empty()) {
+                if (config_.echo) io_.write("\r\n");
+                handle_command(cmd_buf_);
+                cmd_buf_.clear();
+            }
             return;
         }
 
@@ -309,6 +287,7 @@ void AtModem::handle_command(const std::string& line) {
     } else if (body_up == "&K0" || body_up == "&K3" || body_up == "&K4") {
         config_.flow_mode = body_up[2] - '0';
         apply_flow_mode(config_.flow_mode);
+        io_.set_flow_mode(config_.flow_mode);
         reply("OK");
     } else if (body_up.rfind("+PAGE=", 0) == 0) {
         char* endp = nullptr;
@@ -351,17 +330,20 @@ void AtModem::handle_command(const std::string& line) {
         io_.set_page_lines(config_.page_lines);
         io_.set_delays(config_.char_delay_us, config_.line_delay_ms);
         apply_flow_mode(config_.flow_mode);
+        io_.set_flow_mode(config_.flow_mode);
         reply("OK");
     } else if (body_up == "&F") {
         config_.reset_defaults();
         io_.set_page_lines(config_.page_lines);
         io_.set_delays(config_.char_delay_us, config_.line_delay_ms);
         apply_flow_mode(config_.flow_mode);
+        io_.set_flow_mode(config_.flow_mode);
         reply("OK");
     } else if (body_up == "O") {
         if (active_sock_ && active_sock_->is_connected()) {
             mode_ = ModemMode::ONLINE;
             plus_count_ = 0;
+            last_rx_ms_ = io_.ticks_ms();
             reply("CONNECT " + peer_desc_);
         } else {
             reply("NO CARRIER");
@@ -437,67 +419,6 @@ void AtModem::handle_command(const std::string& line) {
             reply("OK");
         } else {
             reply("ERROR: NTP sync failed");
-        }
-    } else if (body_up.rfind("+GOPHER=", 0) == 0) {
-        auto args = parse_quoted_args(body.substr(8));
-        if (!args.empty()) {
-            protocols::gopher_fetch(args[0], io_, net_, nav_);
-            reply("OK");
-        } else {
-            reply("ERROR: Usage AT+GOPHER=\"url\"");
-        }
-    } else if (body_up.rfind("+GEMINI=", 0) == 0) {
-        auto args = parse_quoted_args(body.substr(8));
-        if (!args.empty()) {
-            protocols::gemini_fetch(args[0], io_, net_, nav_);
-            reply("OK");
-        } else {
-            reply("ERROR: Usage AT+GEMINI=\"url\"");
-        }
-    } else if (body_up.rfind("+GO=", 0) == 0) {
-        auto args = parse_quoted_args(body.substr(4));
-        if (!args.empty()) {
-            char* endp = nullptr;
-            unsigned long idx = std::strtoul(args[0].c_str(), &endp, 10);
-            const auto* link = (endp != args[0].c_str()) ? nav_.get_link(idx) : nullptr;
-            if (link) {
-                std::string q = (args.size() > 1) ? args[1] : "";
-                io_.write_paced("+GO [" + std::to_string(idx) + "]: " + link->url + "\r\n");
-                follow_url(link->url, q, true);
-            } else {
-                reply("ERROR: Link [" + args[0] + "] out of range");
-            }
-        } else {
-            reply("ERROR: Usage AT+GO=<n>[,\"query\"]");
-        }
-    } else if (body_up == "+BACK") {
-        if (nav_.has_history()) {
-            std::string prev = nav_.pop_history();
-            io_.write_paced("+BACK: " + prev + "\r\n");
-            follow_url(prev, "", false);
-        } else {
-            reply("ERROR: History is empty");
-        }
-    } else if (body_up == "+LINKS") {
-        io_.reset_pager();
-        if (nav_.links().empty()) {
-            io_.write_paced("+LINKS: None\r\n");
-        } else {
-            for (size_t i = 0; i < nav_.links().size(); ++i) {
-                const auto& lnk = nav_.links()[i];
-                char buf[64];
-                snprintf(buf, sizeof(buf), "[%2zu:%-3s] ", i + 1, lnk.item_type.c_str());
-                if (!io_.write_line_paged(std::string(buf) + lnk.label + " -> " + lnk.url)) break;
-            }
-        }
-        reply("OK");
-    } else if (body_up.rfind("+HTTPGET=", 0) == 0) {
-        auto args = parse_quoted_args(body.substr(9));
-        if (!args.empty()) {
-            protocols::http_fetch(args[0], io_, net_);
-            reply("OK");
-        } else {
-            reply("ERROR: Usage AT+HTTPGET=\"url\"");
         }
     } else if (body_up.rfind("+XMODEM=", 0) == 0) {
         auto args = parse_quoted_args(body.substr(8));

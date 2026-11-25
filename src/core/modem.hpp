@@ -5,7 +5,6 @@
 #include <memory>
 #include "serial_io.hpp"
 #include "net_interface.hpp"
-#include "nav_history.hpp"
 #include "config.hpp"
 
 namespace ttl2wifi {
@@ -38,12 +37,10 @@ public:
 
     ModemMode mode() const { return mode_; }
     ModemConfig& config() { return config_; }
-    NavHistory& nav() { return nav_; }
 
 protected:
     void dial_stream(const std::string& target, bool use_tls);
     void close_socket();
-    void follow_url(const std::string& url, const std::string& query = "", bool push_history = true);
 
     // Helpers
     static std::vector<std::string> parse_quoted_args(const std::string& s);
@@ -52,7 +49,6 @@ protected:
     ISerialIO& io_;
     INetwork& net_;
     ModemConfig config_;
-    NavHistory nav_;
     ModemMode mode_ = ModemMode::COMMAND;
 
     std::unique_ptr<ISocket> active_sock_;

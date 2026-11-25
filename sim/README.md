@@ -13,7 +13,7 @@ make sim                         # type AT commands directly in stdio mode
 ./build/sim/ttl2wifi_sim --connect 127.0.0.1:8823  # connect to SimH listener
 ```
 
-Everything works identically to the Pico W firmware (TCP/TLS dialing, Gopher, Gemini, HTTP, XMODEM, NTP). Wi-Fi scan and status are simulated on the host.
+Everything works identically to the Pico W firmware (TCP/TLS dialing, XMODEM, NTP). Wi-Fi scan and status are simulated on the host.
 
 ## RomWBW in SimH
 

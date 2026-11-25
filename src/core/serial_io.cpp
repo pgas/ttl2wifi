@@ -17,7 +17,30 @@ void ISerialIO::write_paced(const std::string& str) {
 
 void ISerialIO::write_paced(const uint8_t* data, size_t len) {
     for (size_t i = 0; i < len; ++i) {
+        if (aborted_) break;
+
         uint8_t b = data[i];
+
+        if (flow_mode_ == 4) {
+            if (paused_ || b == 0x0A || (i & 15) == 0) {
+                drain_hw_rx(true);
+            }
+            if (paused_) {
+                uint32_t wait_start = ticks_ms();
+                while (paused_ && !aborted_) {
+                    if ((ticks_ms() - wait_start) > 15000) {
+                        paused_ = false;
+                        break;
+                    }
+                    sleep_us(500);
+                    drain_hw_rx(true);
+                }
+                if (aborted_) {
+                    break;
+                }
+            }
+        }
+
         hw_write(&b, 1);
         if (b == 0x0A && line_delay_ms_ > 0) {
             sleep_us(line_delay_ms_ * 1000); // Newline delay for retro terminal scrolling
@@ -48,6 +71,16 @@ void ISerialIO::drain_hw_rx(bool intercept_ctrl_c) {
         for (int i = 0; i < n; ++i) {
             if (intercept_ctrl_c && buf[i] == ASCII_ETX) {
                 aborted_ = true;
+            }
+            if (flow_mode_ == 4) {
+                if (buf[i] == ASCII_XOFF) {
+                    paused_ = true;
+                    continue;
+                }
+                if (buf[i] == ASCII_XON) {
+                    paused_ = false;
+                    continue;
+                }
             }
             rx_queue_.push_back(buf[i]);
         }
@@ -81,14 +114,15 @@ int ISerialIO::read_raw_byte(uint32_t timeout_ms) {
         if (n > 0) {
             return b;
         }
-        if ((ticks_ms() - t0) > timeout_ms) {
+        if ((ticks_ms() - t0) >= timeout_ms) {
             return -1;
         }
-        sleep_us(2000); // 2ms polling sleep
+        sleep_us(200); // 200us polling sleep
     }
 }
 
 void ISerialIO::flush_rx() {
+    paused_ = false;
     rx_queue_.clear();
     uint8_t buf[64];
     while (hw_read(buf, sizeof(buf)) > 0) {

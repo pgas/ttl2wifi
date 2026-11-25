@@ -1,47 +1,40 @@
-# XMODEM File Transfer
+# XMODEM File Transfer (`AT+XMODEM`)
 
-Allows transfering files using only the "standard" HTALK an XM commands
+Bootstraps CP/M `.COM` binaries and files onto a system that only has a basic serial terminal (`ZTALK` / `HTALK`) and `XM.COM`.
 
-## 1. On Host PC: Serve File
+## 1. Host PC (Local Files)
 
-Run `serve_file.py` pointing to the file to transfer:
+To serve a local file over HTTP on your LAN:
 
 ```sh
 ./scripts/serve_file.py path/to/MYFILE.COM
 ```
 
-The script starts an HTTP server and prints the exact commands to run.
+*(Any remote `http://` or `https://` URL also works directly.)*
 
----
+## 2. Queue Download in Terminal
 
-## 2. In CP/M: Queue Download
-
-Assuming, the bridge is connected on Port 1 (port B), initiate the transfer, and return to CP/M:
+Open your CP/M serial terminal on the bridge port (e.g. unit 1) and request the file:
 
 ```text
-B> HTALK 1
+A> ZTALK 01
 AT+XMODEM="http://<IP>:8000/MYFILE.COM"
 ```
 
-Optional: `AT+XMODEM` supports an optional microsecond inter-byte delay (e.g. `AT+XMODEM="url",250`, default: `250` µs) to prevent UART buffer overruns on serial systems without hardware flow control. 
+*(Optional: pass a second argument `AT+XMODEM="url",500` to set the inter-byte delay in microseconds for slower UARTs.)*
 
-Slower 4 MHz Z80 systems can specify a higher delay (e.g. `500` or `800`).
-
-When you see:
-```text
-+XMODEM: Start receiver now (waiting up to 60s for NAK/'C')...
-```
-
-Press **`Ctrl+C`** to exit `HTALK`.
-
----
-
-## 3. In CP/M: Receive File
-
-Immediately start RomWBW's receiver on Port 1 (`R1`):
+Wait for the prompt:
 
 ```text
-B> XM R1 MYFILE.COM
++XMODEM: Downloaded <N> bytes. Start receiver now (waiting up to 60s for NAK/'C')...
 ```
 
-> **Note:** RomWBW's `XM` remains silent during download and prints `Thanks for the upload` upon completion.
+Exit the terminal back to CP/M (`Ctrl+[` in `ZTALK` or `Ctrl+C` in `HTALK`).
+
+## 3. Receive in CP/M
+
+Run `XM` on the bridge port within 60 seconds:
+
+```text
+A> XM R1 MYFILE.COM
+```
